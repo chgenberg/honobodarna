@@ -107,6 +107,22 @@ CREATE TABLE IF NOT EXISTS bv_bookings (
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Permanent kundregister (aggregeras från bokningarna, överlever rensning av gamla bokningar).
+CREATE TABLE IF NOT EXISTS customers (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  dedupe_key   TEXT UNIQUE,                      -- lower(email) eller telefon
+  name         TEXT,
+  email        TEXT,
+  phone        TEXT,
+  stays_count  INTEGER NOT NULL DEFAULT 0,
+  first_visit  TEXT,
+  last_visit   TEXT,
+  next_visit   TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_customers_next ON customers(next_visit);
 CREATE INDEX IF NOT EXISTS idx_arrivals_date ON arrivals(arrival_date);
 CREATE INDEX IF NOT EXISTS idx_msglog_date ON message_log(arrival_date);
 CREATE INDEX IF NOT EXISTS idx_bv_arrival ON bv_bookings(arrival_date);

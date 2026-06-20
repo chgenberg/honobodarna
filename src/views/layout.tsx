@@ -315,6 +315,7 @@ export const Layout: FC<PropsWithChildren<LayoutProps>> = ({ title, active, dryR
   const nav = [
     { href: "/", label: "Idag", key: "today" },
     { href: "/cabins", label: "Sjöbodar & koder", key: "cabins" },
+    { href: "/customers", label: "Kundregister", key: "customers" },
     { href: "/log", label: "Logg", key: "log" },
     { href: "/settings", label: "Inställningar", key: "settings" },
   ];

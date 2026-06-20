@@ -8,6 +8,13 @@ import { requireAuth, verifyCredentials, issueSession, clearSession } from "./au
 import { listCabins, getCabin } from "./matching.js";
 import { bookingCount, getRoomTypes, syncBookings } from "./bookvisit.js";
 import {
+  rebuildCustomers,
+  customerStats,
+  listCustomers,
+  getCustomer,
+  customersWithPhone,
+} from "./customers.js";
+import {
   prepareArrivals,
   getArrivals,
   sendForArrival,
@@ -23,6 +30,8 @@ import {
   CabinsPage,
   LogPage,
   SettingsPage,
+  CustomersPage,
+  CustomerComposePage,
   type ArrivalView,
 } from "./views/pages.js";
 
@@ -276,6 +285,100 @@ app.post("/sync", async (c) => {
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+// ─── Kundregister ────────────────────────────────────────────────────────────
+const logCustomerSms = db.prepare(`
+  INSERT INTO message_log (arrival_date, channel, recipient, body, status, provider_id, error, dry_run)
+  VALUES (?, 'sms', ?, ?, ?, ?, ?, ?)
+`);
+
+app.get("/customers", (c) => {
+  const q = c.req.query("q") ?? "";
+  return c.html(
+    <CustomersPage
+      customers={listCustomers(q)}
+      stats={customerStats()}
+      query={q}
+      dryRun={config.dryRun}
+      flash={flashFrom(c)}
+    />,
+  );
+});
+
+app.get("/customers/:id", (c) => {
+  const id = Number(c.req.param("id"));
+  const customer = getCustomer(id);
+  if (!customer) return c.redirect(redirectFlash("/customers", "err", "Kunden hittades inte."));
+  const history = customer.phone
+    ? (db
+        .prepare(
+          "SELECT created_at, channel, recipient, body, status FROM message_log WHERE recipient = ? ORDER BY id DESC LIMIT 50",
+        )
+        .all(customer.phone) as any[])
+    : [];
+  return c.html(
+    <CustomerComposePage customer={customer} history={history} dryRun={config.dryRun} flash={flashFrom(c)} />,
+  );
+});
+
+app.post("/customers/refresh", (c) => {
+  const n = rebuildCustomers();
+  return c.redirect(redirectFlash("/customers", "ok", `Kundregistret uppdaterat: ${n} kunder.`));
+});
+
+app.post("/customers/sms", async (c) => {
+  const body = await c.req.parseBody();
+  const id = Number(body.customer_id);
+  const message = String(body.message ?? "").trim();
+  const customer = getCustomer(id);
+  if (!customer || !customer.phone) {
+    return c.redirect(redirectFlash(`/customers/${id}`, "err", "Saknar telefonnummer."));
+  }
+  if (!message) return c.redirect(redirectFlash(`/customers/${id}`, "err", "Skriv ett meddelande."));
+  const r = await sendSms(customer.phone, message);
+  logCustomerSms.run(
+    todayInTz(),
+    r.recipient,
+    message,
+    r.status,
+    r.providerId ?? null,
+    r.error ?? null,
+    config.dryRun ? 1 : 0,
+  );
+  const type = r.ok ? "ok" : "err";
+  return c.redirect(redirectFlash(`/customers/${id}`, type, `SMS: ${r.status}` + (r.error ? ` – ${r.error}` : "")));
+});
+
+app.post("/customers/broadcast", async (c) => {
+  const body = await c.req.parseBody();
+  const message = String(body.message ?? "").trim();
+  if (!message) return c.redirect(redirectFlash("/customers", "err", "Skriv ett meddelande."));
+  const recipients = customersWithPhone();
+  let sent = 0;
+  let failed = 0;
+  for (const cust of recipients) {
+    if (!cust.phone) continue;
+    const r = await sendSms(cust.phone, message);
+    logCustomerSms.run(
+      todayInTz(),
+      r.recipient,
+      message,
+      r.status,
+      r.providerId ?? null,
+      r.error ?? null,
+      config.dryRun ? 1 : 0,
+    );
+    if (r.ok) sent++;
+    else failed++;
+  }
+  return c.redirect(
+    redirectFlash(
+      "/customers",
+      failed ? "warn" : "ok",
+      `Massutskick klart: ${sent} skickade, ${failed} fel.` + (config.dryRun ? " (testläge – inget riktigt skickades)" : ""),
+    ),
+  );
+});
 
 // ─── Cron: morgonjobb ────────────────────────────────────────────────────────
 if (cron.validate(config.cronSchedule)) {

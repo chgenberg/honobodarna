@@ -1,6 +1,7 @@
 import type { FC } from "hono/jsx";
 import { Layout, STYLES, HEAD_FONTS } from "./layout.js";
 import type { Cabin } from "../matching.js";
+import type { Customer } from "../customers.js";
 
 function statusPill(status: string) {
   const map: Record<string, string> = {
@@ -426,6 +427,165 @@ export const SettingsPage: FC<SettingsProps> = (p) => (
         <input name="recipient" placeholder="+46… eller mejladress" style="width:280px;" />
         <button class="btn primary" type="submit">Skicka test</button>
       </form>
+    </div>
+  </Layout>
+);
+
+function visit(d: string | null): string {
+  return d ?? "–";
+}
+
+interface CustomersProps {
+  customers: Customer[];
+  stats: { total: number; withPhone: number; withEmail: number; upcoming: number };
+  query: string;
+  dryRun: boolean;
+  flash?: { type: string; msg: string };
+}
+
+export const CustomersPage: FC<CustomersProps> = (p) => (
+  <Layout title="Kundregister" active="customers" dryRun={p.dryRun}>
+    {p.flash ? <div class={`flash ${p.flash.type}`}>{p.flash.msg}</div> : null}
+    <p class="eyebrow">Gäster</p>
+    <h1>Kundregister</h1>
+    <p class="subtitle">Alla gäster vi sett via BookVisit. Registret fylls på automatiskt vid varje synk.</p>
+
+    <div class="grid cols-3" style="margin-bottom:8px;">
+      <div class="card stat hover"><div class="num">{p.stats.total}</div><div class="lbl">Kunder totalt</div></div>
+      <div class="card stat hover"><div class="num">{p.stats.withPhone}</div><div class="lbl">Med telefon</div></div>
+      <div class="card stat hover"><div class="num" style="color:var(--green);">{p.stats.upcoming}</div><div class="lbl">Kommande besök</div></div>
+    </div>
+
+    <div class="toolbar">
+      <form method="get" action="/customers" class="toolbar" style="margin:0;">
+        <input name="q" value={p.query} placeholder="Sök namn, mejl eller nummer…" style="width:300px;" />
+        <button class="btn small" type="submit">Sök</button>
+        {p.query ? <a class="btn small ghost" href="/customers">Rensa</a> : null}
+      </form>
+      <div class="spacer" />
+      <form method="post" action="/customers/refresh" class="inline-form">
+        <button class="btn small" type="submit">↻ Uppdatera register</button>
+      </form>
+    </div>
+
+    <div class="card" style="background:var(--sea-soft); border-color:var(--sea-line);">
+      <h2>Massutskick · SMS</h2>
+      <p class="help" style="margin-top:0;">Skicka samma SMS till <strong>alla {p.stats.withPhone} kunder med telefonnummer</strong>{p.query ? " (sökfiltret påverkar inte massutskick)" : ""}.</p>
+      <form method="post" action="/customers/broadcast" onsubmit={`return confirm('Skicka SMS till ${p.stats.withPhone} kunder?')`}>
+        <div class="field">
+          <textarea name="message" rows={3} placeholder="Skriv ditt meddelande till alla kunder…" required></textarea>
+        </div>
+        <button class="btn primary" type="submit">Skicka till alla ({p.stats.withPhone})</button>
+      </form>
+    </div>
+
+    <div class="card">
+      {p.customers.length === 0 ? (
+        <div class="empty">Inga kunder ännu. Tryck "Uppdatera register" efter en synk.</div>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Gäst</th>
+              <th>Kontakt</th>
+              <th>Vistelser</th>
+              <th>Senaste</th>
+              <th>Nästa</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {p.customers.map((c) => (
+              <tr>
+                <td><strong>{c.name}</strong></td>
+                <td>
+                  {c.phone ? <div><span class="pill sms">SMS</span> {c.phone}</div> : null}
+                  {c.email ? <div class="muted" style="font-size:13px;">{c.email}</div> : null}
+                  {!c.phone && !c.email ? <span class="muted">–</span> : null}
+                </td>
+                <td>{c.stays_count}</td>
+                <td class="muted">{visit(c.last_visit)}</td>
+                <td>{c.next_visit ? <span class="pill sent">{c.next_visit}</span> : <span class="muted">–</span>}</td>
+                <td>
+                  <a class="btn small primary" href={`/customers/${c.id}`}>
+                    {c.phone ? "Skicka SMS" : "Visa"}
+                  </a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  </Layout>
+);
+
+interface MsgRow {
+  created_at: string;
+  channel: string;
+  recipient: string | null;
+  body: string | null;
+  status: string;
+}
+
+interface ComposeProps {
+  customer: Customer;
+  history: MsgRow[];
+  dryRun: boolean;
+  flash?: { type: string; msg: string };
+}
+
+export const CustomerComposePage: FC<ComposeProps> = (p) => (
+  <Layout title="Kund" active="customers" dryRun={p.dryRun}>
+    {p.flash ? <div class={`flash ${p.flash.type}`}>{p.flash.msg}</div> : null}
+    <p class="eyebrow"><a href="/customers" style="color:var(--sea);">← Kundregister</a></p>
+    <h1>{p.customer.name}</h1>
+    <p class="subtitle">
+      {p.customer.phone ? p.customer.phone : "(inget telefonnummer)"}
+      {p.customer.email ? ` · ${p.customer.email}` : ""}
+      {` · ${p.customer.stays_count} vistelser`}
+      {p.customer.next_visit ? ` · nästa besök ${p.customer.next_visit}` : ""}
+    </p>
+
+    <div class="grid cols-2">
+      <div class="card hover">
+        <h2>Skicka SMS</h2>
+        {p.customer.phone ? (
+          <form method="post" action="/customers/sms">
+            <input type="hidden" name="customer_id" value={String(p.customer.id)} />
+            <div class="field">
+              <label>Till</label>
+              <input value={p.customer.phone} disabled />
+            </div>
+            <div class="field">
+              <label>Meddelande</label>
+              <textarea name="message" rows={5} placeholder="Skriv ditt meddelande…" required></textarea>
+            </div>
+            <button class="btn primary" type="submit">Skicka SMS{p.dryRun ? " (test)" : ""}</button>
+          </form>
+        ) : (
+          <p class="muted">Den här kunden saknar telefonnummer{p.customer.email ? " – men har e-post." : "."}</p>
+        )}
+      </div>
+
+      <div class="card hover">
+        <h2>Meddelandehistorik</h2>
+        {p.history.length === 0 ? (
+          <div class="empty" style="padding:24px 0;">Inga meddelanden ännu.</div>
+        ) : (
+          <table>
+            <tbody>
+              {p.history.map((m) => (
+                <tr>
+                  <td class="muted" style="white-space:nowrap;">{new Date(m.created_at + "Z").toLocaleString("sv-SE")}</td>
+                  <td>{m.body}</td>
+                  <td><span class={`pill ${m.status === "sent" || m.status === "dry-run" || m.status === "canary" ? "sent" : "failed"}`}>{m.status}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   </Layout>
 );

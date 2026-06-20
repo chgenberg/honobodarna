@@ -1,5 +1,6 @@
 import { config } from "./config.js";
 import { db, getSetting, setSetting } from "./db.js";
+import { rebuildCustomers } from "./customers.js";
 
 // ─── Token-hantering (cache + auto-renew) ────────────────────────────────────
 let cachedToken: { token: string; fetchedAt: number } | null = null;
@@ -222,6 +223,14 @@ export async function syncBookings(options: { full?: boolean } = {}): Promise<Sy
 
   setSetting("bv_last_sync", startedAt);
   setSetting("bv_last_sync_human", startedAt);
+
+  // Håll kundregistret uppdaterat efter varje synk.
+  try {
+    rebuildCustomers();
+  } catch (err) {
+    console.error("[bookvisit] kunde inte uppdatera kundregistret:", err);
+  }
+
   return { codes: codes.length, fetched, failed, fullSync: !lastSync };
 }
 
