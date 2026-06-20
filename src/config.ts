@@ -86,6 +86,11 @@ export const config = {
 
   cronSchedule: str("CRON_SCHEDULE", "0 7 * * *"),
   autoSend: bool("AUTO_SEND", false),
+  // Intern node-cron körs som standard. Stäng av (false) om du istället
+  // triggar morgonjobbet externt via cron-job.org, så undviks dubbletter.
+  enableInternalCron: bool("ENABLE_INTERNAL_CRON", true),
+  // Hemlighet som krävs för att anropa /api/cron/run externt.
+  cronSecret: str("CRON_SECRET"),
 };
 
 export type AppConfig = typeof config;

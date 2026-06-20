@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { timingSafeEqual } from "node:crypto";
 import cron from "node-cron";
 import { config } from "./config.js";
 import { db, getMessageTemplate, getSetting, setSetting } from "./db.js";
@@ -42,6 +44,34 @@ const app = new Hono();
 
 // Statiska filer (logo + bilder) – före auth så inloggningssidan kan visa loggan.
 app.use("/public/*", serveStatic({ root: "./" }));
+
+// Extern cron-trigger (t.ex. cron-job.org). Skyddad med CRON_SECRET, ligger
+// före inloggningskravet. Kör morgonjobbet asynkront och svarar direkt så att
+// cron-tjänsten inte timeoutar medan synken pågår.
+function cronAuthorized(c: { req: { query: (k: string) => string | undefined; header: (k: string) => string | undefined } }): boolean {
+  if (!config.cronSecret) return false;
+  const provided = c.req.query("token") || c.req.header("x-cron-secret") || "";
+  const a = Buffer.from(provided);
+  const b = Buffer.from(config.cronSecret);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+async function handleCron(c: Context) {
+  if (!config.cronSecret) {
+    return c.json({ ok: false, error: "CRON_SECRET är inte satt" }, 503);
+  }
+  if (!cronAuthorized(c)) {
+    return c.json({ ok: false, error: "Ogiltig token" }, 401);
+  }
+  // Kör i bakgrunden – svara direkt.
+  runMorningJob({ trigger: "cron", send: config.autoSend, sync: true })
+    .then((r) => console.log(`[cron-http] Klart: ${r.arrivalsFound} ankomster, ${r.sent} skickade, ${r.failed} fel.`))
+    .catch((e) => console.error("[cron-http] Fel:", e));
+  return c.json({ ok: true, started: true, date: todayInTz(), autoSend: config.autoSend });
+}
+
+app.get("/api/cron/run", handleCron);
+app.post("/api/cron/run", handleCron);
 
 // ─── Hjälpare ────────────────────────────────────────────────────────────────
 function flashFrom(c: { req: { query: (k: string) => string | undefined } }) {
@@ -396,7 +426,9 @@ app.post("/customers/broadcast", async (c) => {
 });
 
 // ─── Cron: morgonjobb ────────────────────────────────────────────────────────
-if (cron.validate(config.cronSchedule)) {
+if (!config.enableInternalCron) {
+  console.log("[cron] Intern cron avstängd (ENABLE_INTERNAL_CRON=false) – använder extern trigger (cron-job.org).");
+} else if (cron.validate(config.cronSchedule)) {
   cron.schedule(
     config.cronSchedule,
     () => {
