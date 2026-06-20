@@ -32,6 +32,8 @@ export const STYLES = `
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+body { overflow-x: hidden; }
+img, table, textarea { max-width: 100%; }
 body {
   font-family: "Wix Madefor Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background:
@@ -149,7 +151,8 @@ tbody tr:hover { background: #faf8f3; }
 tr:first-child td { border-top: none; }
 
 .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
-        font-weight: 600; padding: 4px 11px; border-radius: 999px; letter-spacing: .01em; }
+        font-weight: 600; padding: 4px 11px; border-radius: 999px; letter-spacing: .01em; white-space: nowrap; }
+.nowrap { white-space: nowrap; }
 .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .pill.pending { background: var(--sand-2); color: var(--muted); }
 .pill.sent { background: var(--green-soft); color: var(--green); }
@@ -292,6 +295,62 @@ strong { font-weight: 600; }
   box-shadow: 0 30px 80px rgba(8,25,35,.45); animation: rise .6s var(--ease) both; }
 .login-card .brand { margin-bottom: 22px; }
 .login-card h1 { font-size: 26px; }
+
+/* ── Mobil (≤ 760px) ────────────────────────────────────── */
+@media (max-width: 760px) {
+  .wrap { padding: 0 15px; }
+  main { padding: 22px 0 56px; }
+  h1 { font-size: 25px; }
+  .subtitle { font-size: 14px; margin-bottom: 20px; }
+  .card { padding: 18px; border-radius: 16px; }
+
+  /* Topbar: brand + badge/logout på rad 1, nav som scrollbar rad 2 */
+  .topbar-inner { height: auto; flex-wrap: wrap; gap: 10px; padding: 11px 0; align-items: center; }
+  .brand { margin-right: auto; }
+  .brand-mark { height: 42px; width: 36px; }
+  .topbar-inner .right { gap: 8px; }
+  .dry-badge { font-size: 11px; padding: 4px 9px; }
+  nav.main {
+    order: 3; width: 100%; flex: 0 0 100%; flex-wrap: wrap; gap: 4px; padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+  nav.main a { white-space: nowrap; padding: 7px 12px; font-size: 14px; }
+  nav.main a::after { display: none; }
+
+  .stat .num { font-size: 32px; }
+
+  /* Verktygsrader + formulär staplas och blir fullbredd */
+  .toolbar { flex-direction: column; align-items: stretch; gap: 9px; }
+  .toolbar form { flex-direction: column; align-items: stretch; width: 100%; }
+  .toolbar .spacer { display: none; }
+  .toolbar input, .toolbar .select-wrap, .toolbar select, .toolbar .btn { width: 100% !important; }
+  .toolbar .select-wrap { min-width: 0 !important; }
+  input[style], textarea[style] { width: 100% !important; }
+  .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; }
+
+  /* Data-tabeller → staplade kort (de som har class="stack") */
+  table.stack thead { display: none; }
+  table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
+  table.stack tr { border-top: none; border-bottom: 1px solid var(--line); padding: 12px 0; }
+  table.stack tr:last-child { border-bottom: none; }
+  table.stack tbody tr:hover { background: transparent; }
+  table.stack td { border: none; padding: 7px 0; display: flex; justify-content: space-between;
+             align-items: center; gap: 14px; text-align: right; min-height: 30px; }
+  table.stack td[data-label]::before {
+    content: attr(data-label); font-weight: 600; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--muted); text-align: left; flex-shrink: 0;
+  }
+  table.stack td .select-wrap, table.stack td form { width: auto; min-width: 0; }
+  table.stack td select { min-width: 150px; }
+  table.stack td .row-actions { justify-content: flex-end; flex-wrap: wrap; }
+  /* Enkla nyckel/värde-tabeller: håll ihop men tillåt radbrytning */
+  table:not(.stack) td { word-break: break-word; }
+}
+@media (max-width: 760px) {
+  /* Login-loggan lite mindre på mobil */
+  .login-logo { width: 132px; }
+  .login-card { width: 100%; }
+}
 `;
 
 interface LayoutProps {

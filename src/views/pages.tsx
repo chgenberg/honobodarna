@@ -133,7 +133,7 @@ export const TodayPage: FC<TodayProps> = (p) => {
         {p.arrivals.length === 0 ? (
           <div class="empty">Inga incheckningar för det här datumet.</div>
         ) : (
-          <table>
+          <table class="stack">
             <thead>
               <tr>
                 <th>Gäst</th>
@@ -148,13 +148,13 @@ export const TodayPage: FC<TodayProps> = (p) => {
             <tbody>
               {p.arrivals.map((a) => (
                 <tr>
-                  <td>
+                  <td data-label="Gäst">
                     <div class="guest-cell">
                       <strong>{a.guest_name}</strong>
                       {a.needs_review ? <span class="pill review tiny">Granska matchning</span> : null}
                     </div>
                   </td>
-                  <td>
+                  <td data-label="Kontakt">
                     {a.phone ? (
                       <div><span class="pill sms">SMS</span> {a.phone}</div>
                     ) : a.email ? (
@@ -163,8 +163,8 @@ export const TodayPage: FC<TodayProps> = (p) => {
                       <span class="pill failed">Saknar kontakt</span>
                     )}
                   </td>
-                  <td class="muted">{a.room_type_label ?? "–"}</td>
-                  <td>
+                  <td class="muted" data-label="Rumstyp">{a.room_type_label ?? "–"}</td>
+                  <td data-label="Sjöbod">
                     <form method="post" action="/assign" class="inline-form">
                       <input type="hidden" name="arrival_id" value={String(a.id)} />
                       <input type="hidden" name="date" value={p.date} />
@@ -180,8 +180,8 @@ export const TodayPage: FC<TodayProps> = (p) => {
                       </span>
                     </form>
                   </td>
-                  <td>{a.door_code ? <span class="code-chip">{a.door_code}</span> : <span class="muted">–</span>}</td>
-                  <td>{statusPill(a.status)}</td>
+                  <td data-label="Kod">{a.door_code ? <span class="code-chip">{a.door_code}</span> : <span class="muted">–</span>}</td>
+                  <td data-label="Status">{statusPill(a.status)}</td>
                   <td>
                     <form method="post" action="/send-one" class="inline-form">
                       <input type="hidden" name="arrival_id" value={String(a.id)} />
@@ -316,7 +316,7 @@ export const LogPage: FC<{ logs: LogRow[]; dryRun: boolean }> = ({ logs, dryRun 
       {logs.length === 0 ? (
         <div class="empty">Inga utskick ännu.</div>
       ) : (
-        <table>
+        <table class="stack">
           <thead>
             <tr>
               <th>Tid</th>
@@ -330,16 +330,16 @@ export const LogPage: FC<{ logs: LogRow[]; dryRun: boolean }> = ({ logs, dryRun 
           <tbody>
             {logs.map((l) => (
               <tr>
-                <td class="muted">{new Date(l.created_at + "Z").toLocaleString("sv-SE")}</td>
-                <td>{l.arrival_date}</td>
-                <td><span class={`pill ${l.channel}`}>{l.channel.toUpperCase()}</span></td>
-                <td>{l.recipient}</td>
-                <td>
+                <td class="muted nowrap" data-label="Tid">{new Date(l.created_at + "Z").toLocaleString("sv-SE")}</td>
+                <td class="nowrap" data-label="Datum">{l.arrival_date}</td>
+                <td data-label="Kanal"><span class={`pill ${l.channel}`}>{l.channel.toUpperCase()}</span></td>
+                <td data-label="Mottagare">{l.recipient}</td>
+                <td data-label="Status">
                   <span class={`pill ${l.status === "sent" || l.status === "dry-run" || l.status === "canary" ? "sent" : "failed"}`}>
                     {l.status}
                   </span>
                 </td>
-                <td class="muted">{l.error ?? ""}</td>
+                <td class="muted" data-label="Fel">{l.error ?? ""}</td>
               </tr>
             ))}
           </tbody>
@@ -519,7 +519,7 @@ export const CustomersPage: FC<CustomersProps> = (p) => (
       {p.customers.length === 0 ? (
         <div class="empty">Inga kunder ännu. Tryck "Uppdatera register" efter en synk.</div>
       ) : (
-        <table>
+        <table class="stack">
           <thead>
             <tr>
               <th>Gäst</th>
@@ -533,15 +533,15 @@ export const CustomersPage: FC<CustomersProps> = (p) => (
           <tbody>
             {p.customers.map((c) => (
               <tr>
-                <td><strong>{c.name}</strong></td>
-                <td>
+                <td data-label="Gäst"><strong>{c.name}</strong></td>
+                <td data-label="Kontakt">
                   {c.phone ? <div><span class="pill sms">SMS</span> {c.phone}</div> : null}
                   {c.email ? <div class="muted" style="font-size:13px;">{c.email}</div> : null}
                   {!c.phone && !c.email ? <span class="muted">–</span> : null}
                 </td>
-                <td>{c.stays_count}</td>
-                <td class="muted">{visit(c.last_visit)}</td>
-                <td>{c.next_visit ? <span class="pill sent">{c.next_visit}</span> : <span class="muted">–</span>}</td>
+                <td data-label="Vistelser">{c.stays_count}</td>
+                <td class="muted nowrap" data-label="Senaste">{visit(c.last_visit)}</td>
+                <td data-label="Nästa">{c.next_visit ? <span class="pill sent">{c.next_visit}</span> : <span class="muted">–</span>}</td>
                 <td>
                   <a class="btn small primary" href={`/customers/${c.id}`}>
                     {c.phone ? "Skicka SMS" : "Visa"}
@@ -609,13 +609,13 @@ export const CustomerComposePage: FC<ComposeProps> = (p) => (
         {p.history.length === 0 ? (
           <div class="empty" style="padding:24px 0;">Inga meddelanden ännu.</div>
         ) : (
-          <table>
+          <table class="stack">
             <tbody>
               {p.history.map((m) => (
                 <tr>
-                  <td class="muted" style="white-space:nowrap;">{new Date(m.created_at + "Z").toLocaleString("sv-SE")}</td>
-                  <td>{m.body}</td>
-                  <td><span class={`pill ${m.status === "sent" || m.status === "dry-run" || m.status === "canary" ? "sent" : "failed"}`}>{m.status}</span></td>
+                  <td class="muted nowrap" data-label="Tid">{new Date(m.created_at + "Z").toLocaleString("sv-SE")}</td>
+                  <td data-label="Meddelande">{m.body}</td>
+                  <td data-label="Status"><span class={`pill ${m.status === "sent" || m.status === "dry-run" || m.status === "canary" ? "sent" : "failed"}`}>{m.status}</span></td>
                 </tr>
               ))}
             </tbody>
