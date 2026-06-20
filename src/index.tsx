@@ -11,8 +11,11 @@ import {
   rebuildCustomers,
   customerStats,
   listCustomers,
+  countCustomers,
   getCustomer,
   customersWithPhone,
+  type CustomerFilter,
+  type CustomerSort,
 } from "./customers.js";
 import {
   prepareArrivals,
@@ -292,13 +295,24 @@ const logCustomerSms = db.prepare(`
   VALUES (?, 'sms', ?, ?, ?, ?, ?, ?)
 `);
 
+const VALID_FILTERS = ["all", "upcoming", "past", "repeat", "phone", "email", "nophone"];
+const VALID_SORTS = ["next", "name", "stays", "last"];
+
 app.get("/customers", (c) => {
   const q = c.req.query("q") ?? "";
+  const filterParam = c.req.query("filter") ?? "all";
+  const sortParam = c.req.query("sort") ?? "next";
+  const filter = (VALID_FILTERS.includes(filterParam) ? filterParam : "all") as CustomerFilter;
+  const sort = (VALID_SORTS.includes(sortParam) ? sortParam : "next") as CustomerSort;
+  const opts = { query: q, filter, sort };
   return c.html(
     <CustomersPage
-      customers={listCustomers(q)}
+      customers={listCustomers(opts)}
+      resultCount={countCustomers(opts)}
       stats={customerStats()}
       query={q}
+      filter={filter}
+      sort={sort}
       dryRun={config.dryRun}
       flash={flashFrom(c)}
     />,

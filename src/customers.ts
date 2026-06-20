@@ -114,22 +114,68 @@ export function customerStats(): CustomerStats {
   };
 }
 
-export function listCustomers(query?: string, limit = 500): Customer[] {
+export type CustomerFilter = "all" | "upcoming" | "past" | "repeat" | "phone" | "email" | "nophone";
+export type CustomerSort = "next" | "name" | "stays" | "last";
+
+export interface ListOptions {
+  query?: string;
+  filter?: CustomerFilter;
+  sort?: CustomerSort;
+  limit?: number;
+}
+
+const SORTS: Record<CustomerSort, string> = {
+  next: "(next_visit IS NULL), next_visit, name",
+  name: "name COLLATE NOCASE",
+  stays: "stays_count DESC, name",
+  last: "(last_visit IS NULL), last_visit DESC, name",
+};
+
+const FILTERS: Record<CustomerFilter, string> = {
+  all: "",
+  upcoming: "next_visit IS NOT NULL",
+  past: "next_visit IS NULL",
+  repeat: "stays_count > 1",
+  phone: "phone IS NOT NULL AND phone <> ''",
+  email: "email IS NOT NULL AND email <> ''",
+  nophone: "phone IS NULL OR phone = ''",
+};
+
+export function listCustomers(opts: ListOptions = {}): Customer[] {
+  const { query, filter = "all", sort = "next", limit = 1000 } = opts;
+  const where: string[] = [];
+  const params: unknown[] = [];
+
   if (query && query.trim()) {
     const q = `%${query.trim().toLowerCase()}%`;
-    return db
-      .prepare(
-        `SELECT * FROM customers
-         WHERE lower(name) LIKE ? OR lower(email) LIKE ? OR phone LIKE ?
-         ORDER BY (next_visit IS NULL), next_visit, name LIMIT ?`,
-      )
-      .all(q, q, q, limit) as Customer[];
+    where.push("(lower(name) LIKE ? OR lower(email) LIKE ? OR phone LIKE ?)");
+    params.push(q, q, q);
   }
-  return db
-    .prepare(
-      `SELECT * FROM customers ORDER BY (next_visit IS NULL), next_visit, name LIMIT ?`,
-    )
-    .all(limit) as Customer[];
+  const filterClause = FILTERS[filter] ?? "";
+  if (filterClause) where.push(`(${filterClause})`);
+
+  const orderBy = SORTS[sort] ?? SORTS.next;
+  const sql =
+    `SELECT * FROM customers` +
+    (where.length ? ` WHERE ${where.join(" AND ")}` : "") +
+    ` ORDER BY ${orderBy} LIMIT ?`;
+  params.push(limit);
+  return db.prepare(sql).all(...params) as Customer[];
+}
+
+export function countCustomers(opts: ListOptions = {}): number {
+  const { query, filter = "all" } = opts;
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (query && query.trim()) {
+    const q = `%${query.trim().toLowerCase()}%`;
+    where.push("(lower(name) LIKE ? OR lower(email) LIKE ? OR phone LIKE ?)");
+    params.push(q, q, q);
+  }
+  const filterClause = FILTERS[filter] ?? "";
+  if (filterClause) where.push(`(${filterClause})`);
+  const sql = `SELECT COUNT(*) AS n FROM customers` + (where.length ? ` WHERE ${where.join(" AND ")}` : "");
+  return (db.prepare(sql).get(...params) as { n: number }).n;
 }
 
 export function getCustomer(id: number): Customer | undefined {

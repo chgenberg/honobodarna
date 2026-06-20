@@ -437,11 +437,30 @@ function visit(d: string | null): string {
 
 interface CustomersProps {
   customers: Customer[];
+  resultCount: number;
   stats: { total: number; withPhone: number; withEmail: number; upcoming: number };
   query: string;
+  filter: string;
+  sort: string;
   dryRun: boolean;
   flash?: { type: string; msg: string };
 }
+
+const FILTER_OPTIONS = [
+  { v: "all", label: "Alla kunder" },
+  { v: "upcoming", label: "Kommande besök" },
+  { v: "repeat", label: "Återkommande (>1 vistelse)" },
+  { v: "phone", label: "Med telefon" },
+  { v: "email", label: "Med e-post" },
+  { v: "nophone", label: "Saknar telefon" },
+  { v: "past", label: "Inga kommande besök" },
+];
+const SORT_OPTIONS = [
+  { v: "next", label: "Nästa besök" },
+  { v: "name", label: "Namn (A–Ö)" },
+  { v: "stays", label: "Flest vistelser" },
+  { v: "last", label: "Senaste besök" },
+];
 
 export const CustomersPage: FC<CustomersProps> = (p) => (
   <Layout title="Kundregister" active="customers" dryRun={p.dryRun}>
@@ -457,16 +476,33 @@ export const CustomersPage: FC<CustomersProps> = (p) => (
     </div>
 
     <div class="toolbar">
-      <form method="get" action="/customers" class="toolbar" style="margin:0;">
-        <input name="q" value={p.query} placeholder="Sök namn, mejl eller nummer…" style="width:300px;" />
+      <form method="get" action="/customers" class="toolbar" style="margin:0; flex-wrap:wrap;">
+        <input name="q" value={p.query} placeholder="Sök namn, mejl eller nummer…" style="width:260px;" />
+        <span class="select-wrap" style="min-width:180px;">
+          <select name="filter" onchange="this.form.submit()">
+            {FILTER_OPTIONS.map((o) => (
+              <option value={o.v} selected={p.filter === o.v}>{o.label}</option>
+            ))}
+          </select>
+        </span>
+        <span class="select-wrap" style="min-width:160px;">
+          <select name="sort" onchange="this.form.submit()">
+            {SORT_OPTIONS.map((o) => (
+              <option value={o.v} selected={p.sort === o.v}>Sortera: {o.label}</option>
+            ))}
+          </select>
+        </span>
         <button class="btn small" type="submit">Sök</button>
-        {p.query ? <a class="btn small ghost" href="/customers">Rensa</a> : null}
+        {p.query || p.filter !== "all" || p.sort !== "next" ? (
+          <a class="btn small ghost" href="/customers">Rensa</a>
+        ) : null}
       </form>
       <div class="spacer" />
       <form method="post" action="/customers/refresh" class="inline-form">
         <button class="btn small" type="submit">↻ Uppdatera register</button>
       </form>
     </div>
+    <p class="help" style="margin:-8px 0 16px;">Visar {p.resultCount} kunder.</p>
 
     <div class="card" style="background:var(--sea-soft); border-color:var(--sea-line);">
       <h2>Massutskick · SMS</h2>
