@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.log
+
+# Secrets – aldrig committa riktiga nycklar
+.env
+.env.*
+!.env.example
+
+# Lokal databas
+data/
+*.sqlite
+*.sqlite3
+*.db
+
+.DS_Store
