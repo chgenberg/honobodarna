@@ -168,7 +168,23 @@ export async function syncBookings(options: { full?: boolean } = {}): Promise<Sy
   const lastSync = options.full ? null : getSetting("bv_last_sync");
   const startedAt = new Date().toISOString();
 
-  const codes = await listBookingCodes(lastSync ?? undefined);
+  // VIKTIGT: booking-codes-v1 kapar vid 1000 koder och returnerar de ÄLDSTA.
+  // En ofiltrerad hämtning missar därför alla nya/kommande bokningar. Vid
+  // initial/full synk använder vi istället ett look-back-fönster (uppdaterade
+  // sedan) som ger de aktuella bokningarna och håller sig under 1000-taket.
+  let sinceIso = lastSync;
+  if (!sinceIso) {
+    const d = new Date();
+    d.setDate(d.getDate() - config.bookvisit.lookbackDays);
+    sinceIso = d.toISOString();
+  }
+
+  const codes = await listBookingCodes(sinceIso);
+  if (codes.length >= 1000) {
+    console.warn(
+      "[bookvisit] booking-codes returnerade 1000 (API-tak nått) – risk att nyaste bokningar trunkeras. Minska BOOKVISIT_LOOKBACK_DAYS.",
+    );
+  }
   let fetched = 0;
   let failed = 0;
 

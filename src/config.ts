@@ -60,6 +60,10 @@ export const config = {
     baseUrl: str("BOOKVISIT_BASE_URL", "https://restapi.bookvisit.com"),
     apiKey: str("BOOKVISIT_API_KEY"),
     channelId: str("BOOKVISIT_CHANNEL_ID"),
+    // booking-codes-API:t kapar vid 1000 koder (äldsta först). Vi filtrerar
+    // därför alltid på "uppdaterad sedan" denna look-back så vi får de
+    // aktuella/kommande bokningarna istället för gamla historiska.
+    lookbackDays: num("BOOKVISIT_LOOKBACK_DAYS", 365),
   },
 
   elks: {
