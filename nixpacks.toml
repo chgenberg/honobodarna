@@ -1,0 +1,4 @@
+# Säkerställ att native-moduler (better-sqlite3) kan byggas om en färdig
+# binär saknas. python3 + build-essential ger node-gyp det den behöver.
+[phases.setup]
+aptPkgs = ["python3", "build-essential"]
