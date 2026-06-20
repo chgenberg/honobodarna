@@ -59,7 +59,9 @@ export function prepareArrivals(date: string): ArrivalRow[] {
 
 export function getArrivals(date: string): ArrivalRow[] {
   return db
-    .prepare("SELECT * FROM arrivals WHERE arrival_date = ? ORDER BY guest_name")
+    .prepare(
+      "SELECT * FROM arrivals WHERE arrival_date = ? AND room_id IS NOT NULL ORDER BY guest_name",
+    )
     .all(date) as ArrivalRow[];
 }
 

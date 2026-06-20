@@ -247,16 +247,30 @@ export interface CachedArrival {
 }
 
 // Läser dagens (eller valt datums) aktiva ankomster ur den lokala speglingen.
+// Endast boendebokningar (med en sjöbod/rumstyp) – standalone-/tilläggsbokningar
+// utan rum har ingen dörrkod att skicka och tas inte med.
 export function getArrivalsForDate(date: string): CachedArrival[] {
   return db
     .prepare(
       `SELECT booking_code, booking_guid, arrival_date, guest_name, phone, email,
               room_id, room_type_label, status
        FROM bv_bookings
-       WHERE arrival_date = ? AND status IS NOT 'Cancelled'
+       WHERE arrival_date = ? AND status IS NOT 'Cancelled' AND room_id IS NOT NULL
        ORDER BY guest_name`,
     )
     .all(date) as CachedArrival[];
+}
+
+// Antal bokningar för datumet som saknar boende (standalone/tillval) – döljs i listan.
+export function countRoomlessForDate(date: string): number {
+  return (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM bv_bookings
+         WHERE arrival_date = ? AND status IS NOT 'Cancelled' AND room_id IS NULL`,
+      )
+      .get(date) as { n: number }
+  ).n;
 }
 
 export function bookingCount(): number {

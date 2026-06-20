@@ -6,7 +6,7 @@ import { config } from "./config.js";
 import { db, getMessageTemplate, getSetting, setSetting } from "./db.js";
 import { requireAuth, verifyCredentials, issueSession, clearSession } from "./auth.js";
 import { listCabins, getCabin } from "./matching.js";
-import { bookingCount, getRoomTypes, syncBookings } from "./bookvisit.js";
+import { bookingCount, getRoomTypes, syncBookings, countRoomlessForDate } from "./bookvisit.js";
 import {
   rebuildCustomers,
   customerStats,
@@ -120,6 +120,7 @@ app.get("/", (c) => {
       lastSync={getSetting("bv_last_sync")}
       flash={flashFrom(c)}
       stats={stats}
+      hiddenCount={countRoomlessForDate(d)}
     />,
   );
 });

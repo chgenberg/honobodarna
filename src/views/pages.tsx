@@ -81,6 +81,7 @@ interface TodayProps {
   lastSync: string | null;
   flash?: { type: string; msg: string };
   stats: { total: number; sent: number; pending: number; review: number };
+  hiddenCount?: number;
 }
 
 export const TodayPage: FC<TodayProps> = (p) => {
@@ -197,6 +198,11 @@ export const TodayPage: FC<TodayProps> = (p) => {
           </table>
         )}
       </div>
+      {p.hiddenCount ? (
+        <p class="help">
+          {p.hiddenCount} bokning{p.hiddenCount > 1 ? "ar" : ""} utan sjöbod (t.ex. tillvals-/standalone-bokningar) visas inte här – de har ingen dörrkod att skicka.
+        </p>
+      ) : null}
       {p.autoSend ? (
         <p class="help">Automatiskt morgonutskick är PÅ. Koder skickas automatiskt enligt schemat.</p>
       ) : (
