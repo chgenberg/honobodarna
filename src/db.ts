@@ -104,7 +104,26 @@ CREATE TABLE IF NOT EXISTS bv_bookings (
   email           TEXT,
   room_id         TEXT,
   room_type_label TEXT,
+  has_bike        INTEGER NOT NULL DEFAULT 0,     -- bokningen innehåller cykel-tillägg
+  bike_label      TEXT,                           -- "Cykel"/"Bikes"
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Utskick av cykel-notiser (egen idempotens, speglar arrivals men för cyklar).
+CREATE TABLE IF NOT EXISTS bike_sends (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  notify_date  TEXT NOT NULL,
+  booking_code TEXT NOT NULL,
+  guest_name   TEXT,
+  phone        TEXT,
+  email        TEXT,
+  bike_label   TEXT,
+  status       TEXT NOT NULL DEFAULT 'pending',   -- pending|sent|failed|skipped
+  channel      TEXT,
+  note         TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (booking_code, notify_date)
 );
 
 -- Permanent kundregister (aggregeras från bokningarna, överlever rensning av gamla bokningar).
@@ -123,6 +142,7 @@ CREATE TABLE IF NOT EXISTS customers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_customers_next ON customers(next_visit);
+CREATE INDEX IF NOT EXISTS idx_bikesends_date ON bike_sends(notify_date);
 CREATE INDEX IF NOT EXISTS idx_arrivals_date ON arrivals(arrival_date);
 CREATE INDEX IF NOT EXISTS idx_msglog_date ON message_log(arrival_date);
 CREATE INDEX IF NOT EXISTS idx_bv_arrival ON bv_bookings(arrival_date);
@@ -138,6 +158,10 @@ function ensureColumn(table: string, column: string, definition: string): void {
 }
 ensureColumn("cabins", "image_url", "TEXT");
 ensureColumn("cabins", "capacity", "TEXT");
+ensureColumn("bv_bookings", "has_bike", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("bv_bookings", "bike_label", "TEXT");
+// Index som beror på kolumner ovan (skapas efter migrationen).
+db.exec("CREATE INDEX IF NOT EXISTS idx_bv_bike ON bv_bookings(has_bike)");
 
 export function getSetting(key: string): string | null {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
@@ -164,5 +188,18 @@ export function getMessageTemplate(): { sms: string; email_subject: string; emai
     email_body:
       getSetting("tmpl_email_body") ??
       "Hej {namn}!\n\nVälkommen till Hönö Sjöbodar.\n\nDin stuga: {stuga}\nDörrkod: {kod}\n\nIncheckning från kl 15:00. Hör av dig om du har frågor.\n\nVänliga hälsningar\nHönö Sjöbodar",
+  };
+}
+
+// Templatevärden för cykelbokningar (egen redigerbar text).
+export function getBikeTemplate(): { sms: string; email_subject: string; email_body: string } {
+  return {
+    sms:
+      getSetting("tmpl_bike_sms") ??
+      "Hej {namn}! Du har bokat cykel hos Hönö Sjöbodar. Cyklarna finns vid receptionen – hör av dig om du har frågor. Trevlig tur!",
+    email_subject: getSetting("tmpl_bike_email_subject") ?? "Din cykelbokning – Hönö Sjöbodar",
+    email_body:
+      getSetting("tmpl_bike_email_body") ??
+      "Hej {namn}!\n\nDu har bokat cykel hos Hönö Sjöbodar. Cyklarna finns vid receptionen.\n\nHör av dig om du har frågor. Trevlig tur!\n\nVänliga hälsningar\nHönö Sjöbodar",
   };
 }

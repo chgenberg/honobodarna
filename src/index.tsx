@@ -5,7 +5,8 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { timingSafeEqual } from "node:crypto";
 import cron from "node-cron";
 import { config } from "./config.js";
-import { db, getMessageTemplate, getSetting, setSetting } from "./db.js";
+import { db, getMessageTemplate, getBikeTemplate, getSetting, setSetting } from "./db.js";
+import { getBikeSends, sendBikeFor } from "./bikes.js";
 import { requireAuth, verifyCredentials, issueSession, clearSession } from "./auth.js";
 import { listCabins, getCabin } from "./matching.js";
 import { bookingCount, getRoomTypes, syncBookings, countRoomlessForDate } from "./bookvisit.js";
@@ -151,6 +152,7 @@ app.get("/", (c) => {
       flash={flashFrom(c)}
       stats={stats}
       hiddenCount={countRoomlessForDate(d)}
+      bikes={getBikeSends(d)}
     />,
   );
 });
@@ -191,13 +193,47 @@ app.post("/send-one", async (c) => {
 app.post("/send-all", async (c) => {
   const body = await c.req.parseBody();
   const d = String(body.date ?? "") || todayInTz();
-  const result = await runMorningJob({ date: d, trigger: "manual", send: true, sync: false });
+  // Endast dörrkoder här (cyklar har egen knapp).
+  const result = await runMorningJob({ date: d, trigger: "manual", send: true, sync: false, bikes: false });
   return c.redirect(
     redirectFlash(
       `/?date=${d}`,
       result.failed ? "warn" : "ok",
-      `Skickade ${result.sent}, misslyckades ${result.failed}, hoppade ${result.skipped}.` +
+      `Skickade ${result.sent} koder, misslyckades ${result.failed}, hoppade ${result.skipped}.` +
         (config.dryRun ? " (testläge – inget riktigt skickades)" : ""),
+    ),
+  );
+});
+
+// ─── Cyklar ──────────────────────────────────────────────────────────────────
+app.post("/bikes/send-one", async (c) => {
+  const body = await c.req.parseBody();
+  const id = Number(body.id);
+  const d = String(body.date ?? "");
+  const out = await sendBikeFor(id, { force: true });
+  const type = out.status === "failed" ? "err" : "ok";
+  return c.redirect(
+    redirectFlash(`/?date=${d}`, type, `Cykel-SMS ${out.guest}: ${out.status}` + (out.error ? ` (${out.error})` : "")),
+  );
+});
+
+app.post("/bikes/send-all", async (c) => {
+  const body = await c.req.parseBody();
+  const d = String(body.date ?? "") || todayInTz();
+  const rows = getBikeSends(d);
+  let sent = 0;
+  let failed = 0;
+  for (const r of rows) {
+    if (r.status === "sent") continue;
+    const out = await sendBikeFor(r.id);
+    if (out.status === "failed") failed++;
+    else if (out.status !== "skipped") sent++;
+  }
+  return c.redirect(
+    redirectFlash(
+      `/?date=${d}`,
+      failed ? "warn" : "ok",
+      `Cykel-SMS: skickade ${sent}, fel ${failed}.` + (config.dryRun ? " (testläge – inget riktigt skickades)" : ""),
     ),
   );
 });
@@ -274,6 +310,7 @@ app.get("/settings", (c) =>
       bookingCount={bookingCount()}
       lastSync={getSetting("bv_last_sync")}
       tmpl={getMessageTemplate()}
+      bikeTmpl={getBikeTemplate()}
       elksConfigured={Boolean(config.elks.username && config.elks.password)}
       smtpConfigured={Boolean(config.smtp.host)}
       canaryPhone={config.canaryPhone}
@@ -289,6 +326,14 @@ app.post("/settings/templates", async (c) => {
   setSetting("tmpl_email_subject", String(body.email_subject ?? ""));
   setSetting("tmpl_email_body", String(body.email_body ?? ""));
   return c.redirect(redirectFlash("/settings", "ok", "Texter sparade."));
+});
+
+app.post("/settings/bike-templates", async (c) => {
+  const body = await c.req.parseBody();
+  setSetting("tmpl_bike_sms", String(body.sms ?? ""));
+  setSetting("tmpl_bike_email_subject", String(body.email_subject ?? ""));
+  setSetting("tmpl_bike_email_body", String(body.email_body ?? ""));
+  return c.redirect(redirectFlash("/settings", "ok", "Cykeltexter sparade."));
 });
 
 app.post("/settings/test", async (c) => {

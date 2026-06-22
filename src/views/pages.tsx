@@ -2,6 +2,7 @@ import type { FC } from "hono/jsx";
 import { Layout, STYLES, HEAD_FONTS } from "./layout.js";
 import type { Cabin } from "../matching.js";
 import type { Customer } from "../customers.js";
+import type { BikeRow } from "../bikes.js";
 
 function statusPill(status: string) {
   const map: Record<string, string> = {
@@ -82,6 +83,7 @@ interface TodayProps {
   flash?: { type: string; msg: string };
   stats: { total: number; sent: number; pending: number; review: number };
   hiddenCount?: number;
+  bikes: BikeRow[];
 }
 
 export const TodayPage: FC<TodayProps> = (p) => {
@@ -203,6 +205,65 @@ export const TodayPage: FC<TodayProps> = (p) => {
           {p.hiddenCount} bokning{p.hiddenCount > 1 ? "ar" : ""} utan sjöbod (t.ex. tillvals-/standalone-bokningar) visas inte här – de har ingen dörrkod att skicka.
         </p>
       ) : null}
+
+      <div style="margin-top:34px;">
+        <p class="eyebrow">Cyklar</p>
+        <h2 style="font-size:18px; text-transform:none; letter-spacing:0;">Cykelbokningar idag</h2>
+        <p class="help" style="margin-top:0; margin-bottom:14px;">
+          Gäster som bokat cykel får ett eget SMS (egen text – ändra under Inställningar).
+        </p>
+        {p.bikes.length > 0 ? (
+          <form method="post" action="/bikes/send-all" class="inline-form" style="margin-bottom:14px;">
+            <input type="hidden" name="date" value={p.date} />
+            <button class="btn primary" type="submit">Skicka cykel-SMS till alla ({p.bikes.length}){p.dryRun ? " (test)" : ""}</button>
+          </form>
+        ) : null}
+        <div class="card">
+          {p.bikes.length === 0 ? (
+            <div class="empty">Inga cykelbokningar för det här datumet.</div>
+          ) : (
+            <table class="stack">
+              <thead>
+                <tr>
+                  <th>Gäst</th>
+                  <th>Kontakt</th>
+                  <th>Cykel</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {p.bikes.map((b) => (
+                  <tr>
+                    <td data-label="Gäst"><strong>{b.guest_name}</strong></td>
+                    <td data-label="Kontakt">
+                      {b.phone ? (
+                        <div><span class="pill sms">SMS</span> {b.phone}</div>
+                      ) : b.email ? (
+                        <div><span class="pill email">E-post</span> {b.email}</div>
+                      ) : (
+                        <span class="pill failed">Saknar kontakt</span>
+                      )}
+                    </td>
+                    <td data-label="Cykel" class="muted">{b.bike_label ?? "Cykel"}</td>
+                    <td data-label="Status">{statusPill(b.status)}</td>
+                    <td>
+                      <form method="post" action="/bikes/send-one" class="inline-form">
+                        <input type="hidden" name="id" value={String(b.id)} />
+                        <input type="hidden" name="date" value={p.date} />
+                        <button class="btn small primary" type="submit">
+                          {b.status === "sent" ? "Skicka igen" : "Skicka"}
+                        </button>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
       {p.autoSend ? (
         <p class="help">Automatiskt morgonutskick är PÅ. Koder skickas automatiskt enligt schemat.</p>
       ) : (
@@ -363,6 +424,7 @@ interface SettingsProps {
   bookingCount: number;
   lastSync: string | null;
   tmpl: { sms: string; email_subject: string; email_body: string };
+  bikeTmpl: { sms: string; email_subject: string; email_body: string };
   elksConfigured: boolean;
   smtpConfigured: boolean;
   canaryPhone: string;
@@ -418,6 +480,28 @@ export const SettingsPage: FC<SettingsProps> = (p) => (
           <button class="btn primary" type="submit">Spara texter</button>
         </form>
       </div>
+    </div>
+
+    <div class="card hover">
+      <h2>Cykeltexter</h2>
+      <p class="help" style="margin-top:0;">Eget meddelande till gäster som bokat cykel. Variabler: {"{namn}"}, {"{fulltnamn}"}</p>
+      <form method="post" action="/settings/bike-templates">
+        <div class="field">
+          <label>SMS-text (cykel)</label>
+          <textarea name="sms" rows={3}>{p.bikeTmpl.sms}</textarea>
+        </div>
+        <div class="grid cols-2">
+          <div class="field">
+            <label>E-post – ämne (cykel)</label>
+            <input name="email_subject" value={p.bikeTmpl.email_subject} />
+          </div>
+        </div>
+        <div class="field">
+          <label>E-post – text (cykel)</label>
+          <textarea name="email_body" rows={5}>{p.bikeTmpl.email_body}</textarea>
+        </div>
+        <button class="btn primary" type="submit">Spara cykeltexter</button>
+      </form>
     </div>
 
     <div class="card">

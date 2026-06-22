@@ -5,6 +5,7 @@ import { sendSms } from "./sms.js";
 import { sendEmail } from "./email.js";
 import { config } from "./config.js";
 import { todayInTz } from "./dates.js";
+import { runBikeNotifications, type BikeJobResult } from "./bikes.js";
 
 export interface ArrivalRow {
   id: number;
@@ -168,6 +169,7 @@ export interface JobResult {
   skipped: number;
   dryRun: boolean;
   outcomes: SendOutcome[];
+  bikes: BikeJobResult;
 }
 
 // Hela morgonkörningen: synka -> förbered -> (ev.) skicka.
@@ -176,6 +178,7 @@ export async function runMorningJob(opts: {
   trigger?: "cron" | "manual";
   send?: boolean;
   sync?: boolean;
+  bikes?: boolean;
 }): Promise<JobResult> {
   const date = opts.date ?? todayInTz();
   const trigger = opts.trigger ?? "manual";
@@ -200,6 +203,10 @@ export async function runMorningJob(opts: {
     }
   }
 
+  // Cykel-notiser (samma körning, egen text). Förbereds alltid; skickas om
+  // shouldSend och inte uttryckligen avstängt (t.ex. "Skicka koder"-knappen).
+  const bikes = await runBikeNotifications({ date, send: shouldSend && opts.bikes !== false });
+
   const sent = outcomes.filter((o) => ["sent", "dry-run", "canary"].includes(o.status)).length;
   const failed = outcomes.filter((o) => o.status === "failed").length;
   const skipped = outcomes.filter((o) => o.status === "skipped").length;
@@ -218,5 +225,5 @@ export async function runMorningJob(opts: {
     JSON.stringify(outcomes).slice(0, 4000),
   );
 
-  return { date, arrivalsFound: arrivals.length, sent, failed, skipped, dryRun: config.dryRun, outcomes };
+  return { date, arrivalsFound: arrivals.length, sent, failed, skipped, dryRun: config.dryRun, outcomes, bikes };
 }

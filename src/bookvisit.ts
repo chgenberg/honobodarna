@@ -87,7 +87,16 @@ export interface RawBooking {
     bookingStatus?: string;
     rooms?: Array<{ roomId?: string }>;
     roomDescriptions?: Array<{ id?: string; name?: string }>;
+    addOnDescriptions?: Array<{ id?: string; name?: string }>;
   };
+}
+
+// Identifierar cykel-tillägg ("Cykel"/"Bikes") i en bokning.
+const BIKE_RE = /cyk|\bbikes?\b/i;
+function bikeInfo(bd?: RawBooking["bookingData"]): { hasBike: boolean; label: string | null } {
+  const names = (bd?.addOnDescriptions ?? []).map((a) => a?.name).filter(Boolean) as string[];
+  const match = names.find((n) => BIKE_RE.test(n));
+  return { hasBike: Boolean(match), label: match ?? null };
 }
 
 export async function getBooking(code: string): Promise<RawBooking | null> {
@@ -144,16 +153,19 @@ function primaryRoom(bd?: RawBooking["bookingData"]): { roomId: string | null; l
 const upsertBooking = db.prepare(`
   INSERT INTO bv_bookings
     (booking_code, booking_guid, arrival_date, departure_date, status,
-     guest_name, phone, phone_country, email, room_id, room_type_label, updated_at)
+     guest_name, phone, phone_country, email, room_id, room_type_label,
+     has_bike, bike_label, updated_at)
   VALUES
     (@booking_code, @booking_guid, @arrival_date, @departure_date, @status,
-     @guest_name, @phone, @phone_country, @email, @room_id, @room_type_label, datetime('now'))
+     @guest_name, @phone, @phone_country, @email, @room_id, @room_type_label,
+     @has_bike, @bike_label, datetime('now'))
   ON CONFLICT(booking_code) DO UPDATE SET
     booking_guid=excluded.booking_guid, arrival_date=excluded.arrival_date,
     departure_date=excluded.departure_date, status=excluded.status,
     guest_name=excluded.guest_name, phone=excluded.phone,
     phone_country=excluded.phone_country, email=excluded.email,
     room_id=excluded.room_id, room_type_label=excluded.room_type_label,
+    has_bike=excluded.has_bike, bike_label=excluded.bike_label,
     updated_at=datetime('now')
 `);
 
@@ -200,6 +212,7 @@ export async function syncBookings(options: { full?: boolean } = {}): Promise<Sy
         if (!b) continue;
         const bd = b.bookingData;
         const { roomId, label } = primaryRoom(bd);
+        const bike = bikeInfo(bd);
         upsertBooking.run({
           booking_code: code,
           booking_guid: bd?.bookingGuidId ?? null,
@@ -212,6 +225,8 @@ export async function syncBookings(options: { full?: boolean } = {}): Promise<Sy
           email: b.bookingCustomer?.email ?? null,
           room_id: roomId,
           room_type_label: label,
+          has_bike: bike.hasBike ? 1 : 0,
+          bike_label: bike.label,
         });
         fetched++;
       } catch {
@@ -259,6 +274,27 @@ export function getArrivalsForDate(date: string): CachedArrival[] {
        ORDER BY guest_name`,
     )
     .all(date) as CachedArrival[];
+}
+
+export interface CachedBike {
+  booking_code: string;
+  arrival_date: string;
+  guest_name: string | null;
+  phone: string | null;
+  email: string | null;
+  bike_label: string | null;
+}
+
+// Cykelbokningar för ett datum (boende + standalone) ur speglingen.
+export function getBikeArrivalsForDate(date: string): CachedBike[] {
+  return db
+    .prepare(
+      `SELECT booking_code, arrival_date, guest_name, phone, email, bike_label
+       FROM bv_bookings
+       WHERE arrival_date = ? AND status IS NOT 'Cancelled' AND has_bike = 1
+       ORDER BY guest_name`,
+    )
+    .all(date) as CachedBike[];
 }
 
 // Antal bokningar för datumet som saknar boende (standalone/tillval) – döljs i listan.
