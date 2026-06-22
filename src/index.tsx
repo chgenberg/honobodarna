@@ -5,8 +5,17 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { timingSafeEqual } from "node:crypto";
 import cron from "node-cron";
 import { config } from "./config.js";
-import { db, getMessageTemplate, getBikeTemplate, getSetting, setSetting } from "./db.js";
+import { db, getSetting, setSetting } from "./db.js";
 import { getBikeSends, sendBikeFor } from "./bikes.js";
+import {
+  getAllTemplates,
+  getTemplate,
+  setTemplate,
+  langForPhone,
+  render as renderTmpl,
+  type TemplateType,
+  type Lang,
+} from "./templates.js";
 import { requireAuth, verifyCredentials, issueSession, clearSession } from "./auth.js";
 import { listCabins, getCabin } from "./matching.js";
 import { bookingCount, getRoomTypes, syncBookings, countRoomlessForDate } from "./bookvisit.js";
@@ -22,7 +31,8 @@ import {
 } from "./customers.js";
 import {
   prepareArrivals,
-  getArrivals,
+  getRegularArrivals,
+  getPackageArrivals,
   sendForArrival,
   runMorningJob,
   type ArrivalRow,
@@ -132,8 +142,8 @@ app.use("*", requireAuth);
 app.get("/", (c) => {
   const date = c.req.query("date");
   const d = date && isValidDate(date) ? date : todayInTz();
-  const rows = getArrivals(d);
-  const arrivals = enrichArrivals(rows);
+  const arrivals = enrichArrivals(getRegularArrivals(d));
+  const packages = enrichArrivals(getPackageArrivals(d));
   const stats = {
     total: arrivals.length,
     sent: arrivals.filter((a) => a.status === "sent").length,
@@ -145,6 +155,7 @@ app.get("/", (c) => {
       date={d}
       humanDate={humanDate(d)}
       arrivals={arrivals}
+      packages={packages}
       cabins={listCabins()}
       dryRun={config.dryRun}
       autoSend={config.autoSend}
@@ -190,16 +201,47 @@ app.post("/send-one", async (c) => {
   return c.redirect(redirectFlash(`/?date=${d}`, type, `${out.guest}: ${out.status}` + (out.error ? ` (${out.error})` : "")));
 });
 
+// Skickar en lista ankomster och returnerar enkel summering.
+async function sendArrivalList(rows: ArrivalRow[]): Promise<{ sent: number; failed: number; skipped: number }> {
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
+  for (const a of rows) {
+    if (a.status === "sent") continue;
+    const out = await sendForArrival(a.id);
+    if (out.status === "failed") failed++;
+    else if (out.status === "skipped") skipped++;
+    else sent++;
+  }
+  return { sent, failed, skipped };
+}
+
 app.post("/send-all", async (c) => {
   const body = await c.req.parseBody();
   const d = String(body.date ?? "") || todayInTz();
-  // Endast dörrkoder här (cyklar har egen knapp).
-  const result = await runMorningJob({ date: d, trigger: "manual", send: true, sync: false, bikes: false });
+  prepareArrivals(d);
+  // Endast vanliga sjöbods-/villakoder här (paket & cyklar har egna knappar).
+  const r = await sendArrivalList(getRegularArrivals(d));
   return c.redirect(
     redirectFlash(
       `/?date=${d}`,
-      result.failed ? "warn" : "ok",
-      `Skickade ${result.sent} koder, misslyckades ${result.failed}, hoppade ${result.skipped}.` +
+      r.failed ? "warn" : "ok",
+      `Skickade ${r.sent} koder, misslyckades ${r.failed}, hoppade ${r.skipped}.` +
+        (config.dryRun ? " (testläge – inget riktigt skickades)" : ""),
+    ),
+  );
+});
+
+app.post("/packages/send-all", async (c) => {
+  const body = await c.req.parseBody();
+  const d = String(body.date ?? "") || todayInTz();
+  prepareArrivals(d);
+  const r = await sendArrivalList(getPackageArrivals(d));
+  return c.redirect(
+    redirectFlash(
+      `/?date=${d}`,
+      r.failed ? "warn" : "ok",
+      `Paket-SMS: skickade ${r.sent}, fel ${r.failed}, hoppade ${r.skipped}.` +
         (config.dryRun ? " (testläge – inget riktigt skickades)" : ""),
     ),
   );
@@ -239,16 +281,25 @@ app.post("/bikes/send-all", async (c) => {
 });
 
 // ─── Sjöbodar & koder ────────────────────────────────────────────────────────
-app.get("/cabins", (c) =>
-  c.html(
+app.get("/cabins", (c) => {
+  const tab = c.req.query("tab") === "cyklar" ? "cyklar" : "sjobodar";
+  return c.html(
     <CabinsPage
       cabins={listCabins(true)}
       roomTypes={getRoomTypes()}
+      tab={tab}
+      bikeLockCode={getSetting("bike_lock_code") ?? "031969952"}
       dryRun={config.dryRun}
       flash={flashFrom(c)}
     />,
-  ),
-);
+  );
+});
+
+app.post("/cabins/bike-code", async (c) => {
+  const body = await c.req.parseBody();
+  setSetting("bike_lock_code", String(body.bike_lock_code ?? "").trim());
+  return c.redirect(redirectFlash("/cabins?tab=cyklar", "ok", "Cykelns låskod sparad."));
+});
 
 app.post("/cabins/add", async (c) => {
   const body = await c.req.parseBody();
@@ -309,8 +360,7 @@ app.get("/settings", (c) =>
       timezone={config.timezone}
       bookingCount={bookingCount()}
       lastSync={getSetting("bv_last_sync")}
-      tmpl={getMessageTemplate()}
-      bikeTmpl={getBikeTemplate()}
+      templates={getAllTemplates()}
       elksConfigured={Boolean(config.elks.username && config.elks.password)}
       smtpConfigured={Boolean(config.smtp.host)}
       canaryPhone={config.canaryPhone}
@@ -320,20 +370,17 @@ app.get("/settings", (c) =>
   ),
 );
 
-app.post("/settings/templates", async (c) => {
+// Sparar en av de tre texterna (sjobod/villa/bike) på båda språken.
+app.post("/settings/templates/:type", async (c) => {
+  const type = c.req.param("type") as TemplateType;
+  if (!["sjobod", "villa", "bike", "package"].includes(type)) {
+    return c.redirect(redirectFlash("/settings", "err", "Okänd texttyp."));
+  }
   const body = await c.req.parseBody();
-  setSetting("tmpl_sms", String(body.sms ?? ""));
-  setSetting("tmpl_email_subject", String(body.email_subject ?? ""));
-  setSetting("tmpl_email_body", String(body.email_body ?? ""));
+  for (const lang of ["sv", "en"] as Lang[]) {
+    setTemplate(type, lang, String(body[`text_${lang}`] ?? ""), String(body[`subject_${lang}`] ?? ""));
+  }
   return c.redirect(redirectFlash("/settings", "ok", "Texter sparade."));
-});
-
-app.post("/settings/bike-templates", async (c) => {
-  const body = await c.req.parseBody();
-  setSetting("tmpl_bike_sms", String(body.sms ?? ""));
-  setSetting("tmpl_bike_email_subject", String(body.email_subject ?? ""));
-  setSetting("tmpl_bike_email_body", String(body.email_body ?? ""));
-  return c.redirect(redirectFlash("/settings", "ok", "Cykeltexter sparade."));
 });
 
 app.post("/settings/test", async (c) => {
@@ -341,13 +388,13 @@ app.post("/settings/test", async (c) => {
   const channel = String(body.channel ?? "sms");
   const recipient = String(body.recipient ?? "").trim();
   if (!recipient) return c.redirect(redirectFlash("/settings", "err", "Ange en mottagare."));
-  const tmpl = getMessageTemplate();
+  const lang = channel === "sms" ? langForPhone(recipient) : langForPhone(null);
+  const tmpl = getTemplate("sjobod", lang);
   const demo = { namn: "Test", fulltnamn: "Test Testsson", stuga: "Sjöbod 1", kod: "1234" };
-  const render = (t: string) => t.replace(/\{(\w+)\}/g, (_, k) => (demo as any)[k] ?? "");
   const result =
     channel === "email"
-      ? await sendEmail(recipient, render(tmpl.email_subject), render(tmpl.email_body))
-      : await sendSms(recipient, render(tmpl.sms));
+      ? await sendEmail(recipient, renderTmpl(tmpl.subject, demo), renderTmpl(tmpl.text, demo))
+      : await sendSms(recipient, renderTmpl(tmpl.text, demo));
   const type = result.ok ? "ok" : "err";
   return c.redirect(redirectFlash("/settings", type, `Test (${channel}): ${result.status}` + (result.error ? ` – ${result.error}` : "")));
 });

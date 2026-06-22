@@ -1,4 +1,4 @@
-import { db, getMessageTemplate } from "./db.js";
+import { db } from "./db.js";
 import { getArrivalsForDate, syncBookings } from "./bookvisit.js";
 import { assignCabinsForDate, getCabin } from "./matching.js";
 import { sendSms } from "./sms.js";
@@ -6,6 +6,7 @@ import { sendEmail } from "./email.js";
 import { config } from "./config.js";
 import { todayInTz } from "./dates.js";
 import { runBikeNotifications, type BikeJobResult } from "./bikes.js";
+import { getTemplate, langForPhone, render } from "./templates.js";
 
 export interface ArrivalRow {
   id: number;
@@ -21,19 +22,20 @@ export interface ArrivalRow {
   channel: string | null;
   needs_review: number;
   note: string | null;
+  is_package: number;
 }
 
 const upsertArrival = db.prepare(`
   INSERT INTO arrivals
     (arrival_date, booking_code, booking_guid, guest_name, phone, email,
-     room_id, room_type_label, status)
+     room_id, room_type_label, is_package, status)
   VALUES
     (@arrival_date, @booking_code, @booking_guid, @guest_name, @phone, @email,
-     @room_id, @room_type_label, 'pending')
+     @room_id, @room_type_label, @is_package, 'pending')
   ON CONFLICT(booking_code, arrival_date) DO UPDATE SET
     guest_name=excluded.guest_name, phone=excluded.phone, email=excluded.email,
     room_id=excluded.room_id, room_type_label=excluded.room_type_label,
-    updated_at=datetime('now')
+    is_package=excluded.is_package, updated_at=datetime('now')
 `);
 
 // Importerar dagens ankomster från speglingen till arrivals-tabellen och matchar stugor.
@@ -50,6 +52,7 @@ export function prepareArrivals(date: string): ArrivalRow[] {
         email: c.email,
         room_id: c.room_id,
         room_type_label: c.room_type_label,
+        is_package: c.has_package ? 1 : 0,
       });
     }
   });
@@ -58,6 +61,7 @@ export function prepareArrivals(date: string): ArrivalRow[] {
   return getArrivals(date);
 }
 
+// Alla boendeankomster (med rum). is_package skiljer paket från vanliga.
 export function getArrivals(date: string): ArrivalRow[] {
   return db
     .prepare(
@@ -66,14 +70,17 @@ export function getArrivals(date: string): ArrivalRow[] {
     .all(date) as ArrivalRow[];
 }
 
+export function getRegularArrivals(date: string): ArrivalRow[] {
+  return getArrivals(date).filter((a) => !a.is_package);
+}
+
+export function getPackageArrivals(date: string): ArrivalRow[] {
+  return getArrivals(date).filter((a) => a.is_package);
+}
+
 export function getArrival(id: number): ArrivalRow | undefined {
   return db.prepare("SELECT * FROM arrivals WHERE id = ?").get(id) as ArrivalRow | undefined;
 }
-
-function renderTemplate(tmpl: string, vars: Record<string, string>): string {
-  return tmpl.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? "");
-}
-
 const logMessage = db.prepare(`
   INSERT INTO message_log
     (arrival_id, arrival_date, channel, recipient, body, status, provider_id, error, dry_run)
@@ -98,7 +105,6 @@ export async function sendForArrival(id: number, opts: { force?: boolean } = {})
   }
 
   const cabin = a.cabin_id ? getCabin(a.cabin_id) : undefined;
-  const tmpl = getMessageTemplate();
 
   if (!cabin || !cabin.door_code) {
     db.prepare("UPDATE arrivals SET status='skipped', note=?, updated_at=datetime('now') WHERE id=?").run(
@@ -108,25 +114,29 @@ export async function sendForArrival(id: number, opts: { force?: boolean } = {})
     return { arrivalId: id, guest: a.guest_name ?? "?", channel: "none", status: "skipped" };
   }
 
+  // Paket (sjöbod + middag) → pakettext; villa → villatext; annars sjöbod-text.
+  // Språk styrs av numret (+46 = svenska, annars engelska).
+  const isVilla = /villa/i.test(`${cabin.room_type_label ?? ""} ${cabin.name ?? ""}`);
+  const type = a.is_package ? "package" : isVilla ? "villa" : "sjobod";
+  const lang = langForPhone(a.phone);
+  const tmpl = getTemplate(type, lang);
+
   const vars = {
     namn: (a.guest_name ?? "gäst").split(" ")[0],
     fulltnamn: a.guest_name ?? "gäst",
     stuga: cabin.name,
     kod: cabin.door_code,
   };
+  const body = render(tmpl.text, vars);
 
   let channel: "sms" | "email" | "none" = "none";
   let result;
   if (a.phone) {
     channel = "sms";
-    result = await sendSms(a.phone, renderTemplate(tmpl.sms, vars));
+    result = await sendSms(a.phone, body);
   } else if (a.email) {
     channel = "email";
-    result = await sendEmail(
-      a.email,
-      renderTemplate(tmpl.email_subject, vars),
-      renderTemplate(tmpl.email_body, vars),
-    );
+    result = await sendEmail(a.email, render(tmpl.subject, vars), body);
   } else {
     db.prepare("UPDATE arrivals SET status='skipped', note=?, updated_at=datetime('now') WHERE id=?").run(
       "Varken telefon eller e-post finns",
@@ -140,7 +150,7 @@ export async function sendForArrival(id: number, opts: { force?: boolean } = {})
     arrival_date: a.arrival_date,
     channel,
     recipient: result.recipient,
-    body: channel === "sms" ? renderTemplate(tmpl.sms, vars) : renderTemplate(tmpl.email_body, vars),
+    body,
     status: result.status,
     provider_id: result.providerId ?? null,
     error: result.error ?? null,

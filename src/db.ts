@@ -106,6 +106,8 @@ CREATE TABLE IF NOT EXISTS bv_bookings (
   room_type_label TEXT,
   has_bike        INTEGER NOT NULL DEFAULT 0,     -- bokningen innehåller cykel-tillägg
   bike_label      TEXT,                           -- "Cykel"/"Bikes"
+  has_package     INTEGER NOT NULL DEFAULT 0,     -- paket (sjöbod + middag)
+  package_label   TEXT,                           -- t.ex. "3-rätters Vinga-meny på Tullhuset"
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -160,6 +162,9 @@ ensureColumn("cabins", "image_url", "TEXT");
 ensureColumn("cabins", "capacity", "TEXT");
 ensureColumn("bv_bookings", "has_bike", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("bv_bookings", "bike_label", "TEXT");
+ensureColumn("bv_bookings", "has_package", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("bv_bookings", "package_label", "TEXT");
+ensureColumn("arrivals", "is_package", "INTEGER NOT NULL DEFAULT 0");
 // Index som beror på kolumner ovan (skapas efter migrationen).
 db.exec("CREATE INDEX IF NOT EXISTS idx_bv_bike ON bv_bookings(has_bike)");
 
@@ -177,29 +182,4 @@ export function setSetting(key: string, value: string): void {
   ).run(key, value);
 }
 
-// Templatevärden med rimliga defaults.
-export function getMessageTemplate(): { sms: string; email_subject: string; email_body: string } {
-  return {
-    sms:
-      getSetting("tmpl_sms") ??
-      "Hej {namn}! Välkommen till Hönö Sjöbodar. Din stuga: {stuga}. Dörrkod: {kod}. Incheckning från 15:00. Trevlig vistelse!",
-    email_subject:
-      getSetting("tmpl_email_subject") ?? "Din dörrkod till Hönö Sjöbodar",
-    email_body:
-      getSetting("tmpl_email_body") ??
-      "Hej {namn}!\n\nVälkommen till Hönö Sjöbodar.\n\nDin stuga: {stuga}\nDörrkod: {kod}\n\nIncheckning från kl 15:00. Hör av dig om du har frågor.\n\nVänliga hälsningar\nHönö Sjöbodar",
-  };
-}
-
-// Templatevärden för cykelbokningar (egen redigerbar text).
-export function getBikeTemplate(): { sms: string; email_subject: string; email_body: string } {
-  return {
-    sms:
-      getSetting("tmpl_bike_sms") ??
-      "Hej {namn}! Du har bokat cykel hos Hönö Sjöbodar. Cyklarna finns vid receptionen – hör av dig om du har frågor. Trevlig tur!",
-    email_subject: getSetting("tmpl_bike_email_subject") ?? "Din cykelbokning – Hönö Sjöbodar",
-    email_body:
-      getSetting("tmpl_bike_email_body") ??
-      "Hej {namn}!\n\nDu har bokat cykel hos Hönö Sjöbodar. Cyklarna finns vid receptionen.\n\nHör av dig om du har frågor. Trevlig tur!\n\nVänliga hälsningar\nHönö Sjöbodar",
-  };
-}
+// Meddelandemallar finns i src/templates.ts (tre typer × två språk).

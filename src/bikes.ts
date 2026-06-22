@@ -1,8 +1,9 @@
-import { db, getBikeTemplate } from "./db.js";
+import { db, getSetting } from "./db.js";
 import { getBikeArrivalsForDate } from "./bookvisit.js";
 import { sendSms } from "./sms.js";
 import { sendEmail } from "./email.js";
 import { config } from "./config.js";
+import { getTemplate, langForPhone, render } from "./templates.js";
 
 export interface BikeRow {
   id: number;
@@ -54,10 +55,6 @@ export function getBikeSend(id: number): BikeRow | undefined {
   return db.prepare("SELECT * FROM bike_sends WHERE id = ?").get(id) as BikeRow | undefined;
 }
 
-function render(tmpl: string, vars: Record<string, string>): string {
-  return tmpl.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? "");
-}
-
 const logMessage = db.prepare(`
   INSERT INTO message_log (arrival_date, channel, recipient, body, status, provider_id, error, dry_run)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -78,20 +75,22 @@ export async function sendBikeFor(id: number, opts: { force?: boolean } = {}): P
     return { id, guest: b.guest_name ?? "?", channel: (b.channel as any) ?? "none", status: "already-sent" };
   }
 
-  const tmpl = getBikeTemplate();
+  const tmpl = getTemplate("bike", langForPhone(b.phone));
   const vars = {
     namn: (b.guest_name ?? "gäst").split(" ")[0],
     fulltnamn: b.guest_name ?? "gäst",
+    kod: getSetting("bike_lock_code") ?? "031969952",
   };
+  const body = render(tmpl.text, vars);
 
   let channel: "sms" | "email" | "none" = "none";
   let result;
   if (b.phone) {
     channel = "sms";
-    result = await sendSms(b.phone, render(tmpl.sms, vars));
+    result = await sendSms(b.phone, body);
   } else if (b.email) {
     channel = "email";
-    result = await sendEmail(b.email, render(tmpl.email_subject, vars), render(tmpl.email_body, vars));
+    result = await sendEmail(b.email, render(tmpl.subject, vars), body);
   } else {
     db.prepare("UPDATE bike_sends SET status='skipped', note=?, updated_at=datetime('now') WHERE id=?").run(
       "Varken telefon eller e-post finns",
@@ -104,7 +103,7 @@ export async function sendBikeFor(id: number, opts: { force?: boolean } = {}): P
     b.notify_date,
     channel,
     result.recipient,
-    channel === "sms" ? render(tmpl.sms, vars) : render(tmpl.email_body, vars),
+    body,
     result.status,
     result.providerId ?? null,
     result.error ?? null,

@@ -88,6 +88,7 @@ export interface RawBooking {
     rooms?: Array<{ roomId?: string }>;
     roomDescriptions?: Array<{ id?: string; name?: string }>;
     addOnDescriptions?: Array<{ id?: string; name?: string }>;
+    packageDescriptions?: Array<{ id?: string; name?: string }>;
   };
 }
 
@@ -97,6 +98,17 @@ function bikeInfo(bd?: RawBooking["bookingData"]): { hasBike: boolean; label: st
   const names = (bd?.addOnDescriptions ?? []).map((a) => a?.name).filter(Boolean) as string[];
   const match = names.find((n) => BIKE_RE.test(n));
   return { hasBike: Boolean(match), label: match ?? null };
+}
+
+// Identifierar paket (sjöbod + middag) via middags-/menytillägg eller paketbeskrivning.
+const PACKAGE_RE = /tullhuset|middag|\bmeny\b|3-rätt|skaldjur|dinner/i;
+function packageInfo(bd?: RawBooking["bookingData"]): { hasPackage: boolean; label: string | null } {
+  const names = [
+    ...(bd?.addOnDescriptions ?? []).map((a) => a?.name),
+    ...(bd?.packageDescriptions ?? []).map((p) => p?.name),
+  ].filter(Boolean) as string[];
+  const match = names.find((n) => PACKAGE_RE.test(n));
+  return { hasPackage: Boolean(match), label: match ?? null };
 }
 
 export async function getBooking(code: string): Promise<RawBooking | null> {
@@ -154,11 +166,11 @@ const upsertBooking = db.prepare(`
   INSERT INTO bv_bookings
     (booking_code, booking_guid, arrival_date, departure_date, status,
      guest_name, phone, phone_country, email, room_id, room_type_label,
-     has_bike, bike_label, updated_at)
+     has_bike, bike_label, has_package, package_label, updated_at)
   VALUES
     (@booking_code, @booking_guid, @arrival_date, @departure_date, @status,
      @guest_name, @phone, @phone_country, @email, @room_id, @room_type_label,
-     @has_bike, @bike_label, datetime('now'))
+     @has_bike, @bike_label, @has_package, @package_label, datetime('now'))
   ON CONFLICT(booking_code) DO UPDATE SET
     booking_guid=excluded.booking_guid, arrival_date=excluded.arrival_date,
     departure_date=excluded.departure_date, status=excluded.status,
@@ -166,6 +178,7 @@ const upsertBooking = db.prepare(`
     phone_country=excluded.phone_country, email=excluded.email,
     room_id=excluded.room_id, room_type_label=excluded.room_type_label,
     has_bike=excluded.has_bike, bike_label=excluded.bike_label,
+    has_package=excluded.has_package, package_label=excluded.package_label,
     updated_at=datetime('now')
 `);
 
@@ -174,6 +187,113 @@ export interface SyncResult {
   fetched: number;
   failed: number;
   fullSync: boolean;
+}
+
+// Mappar en hämtad bokning till bv_bookings.
+function storeBooking(code: string, b: RawBooking): void {
+  const bd = b.bookingData;
+  const { roomId, label } = primaryRoom(bd);
+  const bike = bikeInfo(bd);
+  const pkg = packageInfo(bd);
+  upsertBooking.run({
+    booking_code: code,
+    booking_guid: bd?.bookingGuidId ?? null,
+    arrival_date: bd?.startDate ?? null,
+    departure_date: bd?.endDate ?? null,
+    status: bd?.bookingStatus ?? null,
+    guest_name: fullName(b.bookingCustomer),
+    phone: normalizePhone(b.bookingCustomer?.phoneNumber, b.bookingCustomer?.phoneCountryCode),
+    phone_country: b.bookingCustomer?.phoneCountryCode ?? null,
+    email: b.bookingCustomer?.email ?? null,
+    room_id: roomId,
+    room_type_label: label,
+    has_bike: bike.hasBike ? 1 : 0,
+    bike_label: bike.label,
+    has_package: pkg.hasPackage ? 1 : 0,
+    package_label: pkg.label,
+  });
+}
+
+// Hämtar en lista koder med begränsad samtidighet och lagrar dem.
+async function fetchAndStore(codes: string[], concurrency = 5): Promise<{ fetched: number; failed: number }> {
+  let fetched = 0;
+  let failed = 0;
+  let idx = 0;
+  async function worker() {
+    while (idx < codes.length) {
+      const code = codes[idx++];
+      try {
+        const b = await getBooking(code);
+        if (!b) continue;
+        storeBooking(code, b);
+        fetched++;
+      } catch {
+        failed++;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  return { fetched, failed };
+}
+
+// Djup-skrapning: kringgår 1000-taket genom att unionera koder från en stege
+// av "uppdaterad sedan"-ankare (samt ofiltrerat = äldsta 1000). Fångar i princip
+// alla bokningar genom historien → komplett kundregister.
+export async function deepHistoricalScrape(opts: {
+  sinceYear?: number;
+  stepMonths?: number;
+  onProgress?: (msg: string) => void;
+} = {}): Promise<{ distinctCodes: number; fetched: number; failed: number }> {
+  const step = opts.stepMonths ?? 6;
+  const log = opts.onProgress ?? (() => {});
+  const startYear = opts.sinceYear ?? 2017;
+  const now = new Date();
+
+  const anchors: (string | undefined)[] = [undefined]; // ofiltrerat = äldsta 1000
+  for (let d = new Date(Date.UTC(startYear, 0, 1)); d < now; d.setUTCMonth(d.getUTCMonth() + step)) {
+    anchors.push(d.toISOString());
+  }
+
+  const all = new Set<string>();
+  for (const a of anchors) {
+    try {
+      const codes = await listBookingCodes(a);
+      codes.forEach((c) => all.add(c));
+      log(`ankare ${a ?? "ALLA(äldsta)"}: ${codes.length} koder · distinkt totalt ${all.size}`);
+    } catch (e) {
+      log(`ankare ${a ?? "ALLA"} fel: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
+  const codes = [...all];
+  log(`Hämtar ${codes.length} unika bokningar…`);
+  let fetched = 0;
+  let failed = 0;
+  let idx = 0;
+  const conc = 6;
+  async function worker() {
+    while (idx < codes.length) {
+      const code = codes[idx++];
+      try {
+        const b = await getBooking(code);
+        if (b) {
+          storeBooking(code, b);
+          fetched++;
+        }
+      } catch {
+        failed++;
+      }
+      if ((fetched + failed) % 200 === 0) log(`…hämtat ${fetched} (fel ${failed}) av ${codes.length}`);
+    }
+  }
+  await Promise.all(Array.from({ length: conc }, worker));
+
+  try {
+    rebuildCustomers();
+  } catch (e) {
+    log(`kunde inte bygga kundregister: ${e instanceof Error ? e.message : e}`);
+  }
+  return { distinctCodes: codes.length, fetched, failed };
 }
 
 // Synkar BookVisit-bokningar till bv_bookings. Inkrementellt om vi synkat förut.
@@ -198,43 +318,7 @@ export async function syncBookings(options: { full?: boolean } = {}): Promise<Sy
       "[bookvisit] booking-codes returnerade 1000 (API-tak nått) – risk att nyaste bokningar trunkeras. Minska BOOKVISIT_LOOKBACK_DAYS.",
     );
   }
-  let fetched = 0;
-  let failed = 0;
-
-  // Begränsad samtidighet för att inte trigga rate-limit.
-  const concurrency = 4;
-  let idx = 0;
-  async function worker() {
-    while (idx < codes.length) {
-      const code = codes[idx++];
-      try {
-        const b = await getBooking(code);
-        if (!b) continue;
-        const bd = b.bookingData;
-        const { roomId, label } = primaryRoom(bd);
-        const bike = bikeInfo(bd);
-        upsertBooking.run({
-          booking_code: code,
-          booking_guid: bd?.bookingGuidId ?? null,
-          arrival_date: bd?.startDate ?? null,
-          departure_date: bd?.endDate ?? null,
-          status: bd?.bookingStatus ?? null,
-          guest_name: fullName(b.bookingCustomer),
-          phone: normalizePhone(b.bookingCustomer?.phoneNumber, b.bookingCustomer?.phoneCountryCode),
-          phone_country: b.bookingCustomer?.phoneCountryCode ?? null,
-          email: b.bookingCustomer?.email ?? null,
-          room_id: roomId,
-          room_type_label: label,
-          has_bike: bike.hasBike ? 1 : 0,
-          bike_label: bike.label,
-        });
-        fetched++;
-      } catch {
-        failed++;
-      }
-    }
-  }
-  await Promise.all(Array.from({ length: concurrency }, worker));
+  const { fetched, failed } = await fetchAndStore(codes, 4);
 
   setSetting("bv_last_sync", startedAt);
   setSetting("bv_last_sync_human", startedAt);
@@ -259,6 +343,7 @@ export interface CachedArrival {
   room_id: string | null;
   room_type_label: string | null;
   status: string | null;
+  has_package: number;
 }
 
 // Läser dagens (eller valt datums) aktiva ankomster ur den lokala speglingen.
@@ -268,7 +353,7 @@ export function getArrivalsForDate(date: string): CachedArrival[] {
   return db
     .prepare(
       `SELECT booking_code, booking_guid, arrival_date, guest_name, phone, email,
-              room_id, room_type_label, status
+              room_id, room_type_label, status, has_package
        FROM bv_bookings
        WHERE arrival_date = ? AND status IS NOT 'Cancelled' AND room_id IS NOT NULL
        ORDER BY guest_name`,
