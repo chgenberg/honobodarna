@@ -282,7 +282,8 @@ app.post("/bikes/send-all", async (c) => {
 
 // ─── Sjöbodar & koder ────────────────────────────────────────────────────────
 app.get("/cabins", (c) => {
-  const tab = c.req.query("tab") === "cyklar" ? "cyklar" : "sjobodar";
+  const t = c.req.query("tab");
+  const tab = t === "cyklar" ? "cyklar" : t === "matpaket" ? "matpaket" : "sjobodar";
   return c.html(
     <CabinsPage
       cabins={listCabins(true)}

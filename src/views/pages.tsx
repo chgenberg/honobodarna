@@ -321,6 +321,7 @@ export const CabinsPage: FC<CabinsProps> = (p) => (
     <div class="toolbar" style="gap:8px; margin-bottom:22px;">
       <a class={`btn small ${p.tab === "sjobodar" ? "primary" : ""}`} href="/cabins">Sjöbodar</a>
       <a class={`btn small ${p.tab === "cyklar" ? "primary" : ""}`} href="/cabins?tab=cyklar">Cyklar</a>
+      <a class={`btn small ${p.tab === "matpaket" ? "primary" : ""}`} href="/cabins?tab=matpaket">Matpaket</a>
     </div>
 
     {p.tab === "cyklar" ? (
@@ -334,6 +335,20 @@ export const CabinsPage: FC<CabinsProps> = (p) => (
           <button class="btn small primary" type="submit">Spara kod</button>
         </form>
         <p class="help">Själva cykeltexten ändrar du under Inställningar → Cyklar.</p>
+      </div>
+    ) : p.tab === "matpaket" ? (
+      <div class="card" style="max-width:620px;">
+        <h2>Matpaket – sjöbod & middag</h2>
+        <p class="help" style="margin-top:0;">
+          Matpaket är en egen artikel från BookVisit: gästen bor i en sjöbod och har middag bokad på Tullhuset. De får ett eget meddelande med sjöbodens dörrkod plus middagsinfo.
+        </p>
+        <table>
+          <tbody>
+            <tr><td>Dörrkod</td><td class="muted">Tas automatiskt från den tilldelade sjöboden – ingen egen kod att hantera här.</td></tr>
+            <tr><td>Dagens paketgäster</td><td><a href="/">Idag</a> → sektionen "Paket – sjöbod & middag"</td></tr>
+            <tr><td>Meddelandetext (sv/en)</td><td><a href="/settings">Inställningar</a> → "Paket (sjöbod + middag)"</td></tr>
+          </tbody>
+        </table>
       </div>
     ) : (
       <>
