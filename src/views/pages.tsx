@@ -201,7 +201,9 @@ export const TodayPage: FC<TodayProps> = (p) => {
             Skicka alla koder nu{p.dryRun ? " (test)" : ""}
           </button>
         </form>
-        <button type="button" class="btn" id="alUploadBtn">⤓ Ladda upp ankomstlista</button>
+        <span class="inline-form">
+          <button type="button" class="btn" id="alUploadBtn">⤓ Ladda upp ankomstlista</button>
+        </span>
         <div class="spacer" />
         <form method="get" action="/" class="inline-form toolbar">
           <input type="date" name="date" value={p.date} />
