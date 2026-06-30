@@ -129,6 +129,24 @@ main .grid.cols-3 > .card:nth-child(3) { animation-delay: .12s; }
   transition: transform .25s var(--ease), box-shadow .25s var(--ease), border-color .25s var(--ease);
 }
 .card.hover:hover { transform: translateY(-3px); box-shadow: var(--shadow-hover); border-color: var(--sea-line); }
+/* Hopfällbar panel (t.ex. engångsåtgärder) */
+details.collapsible {
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow); margin-bottom: 18px;
+}
+details.collapsible > summary {
+  list-style: none; cursor: pointer; padding: 14px 18px; font-weight: 600; font-size: 15px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; user-select: none;
+}
+details.collapsible > summary::-webkit-details-marker { display: none; }
+details.collapsible > summary::after {
+  content: "›"; font-size: 22px; line-height: 1; color: var(--muted);
+  transition: transform .2s var(--ease);
+}
+details.collapsible[open] > summary::after { transform: rotate(90deg); }
+details.collapsible > summary:hover { color: var(--sea); }
+details.collapsible .collapsible-body { padding: 0 18px 16px; }
+details.collapsible .collapsible-body > :first-child { margin-top: 0; }
 .grid { display: grid; gap: 20px; }
 .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
 .grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
