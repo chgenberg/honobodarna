@@ -104,6 +104,17 @@ export async function sendForArrival(id: number, opts: { force?: boolean } = {})
     return { arrivalId: id, guest: a.guest_name ?? "?", channel: (a.channel as any) ?? "none", status: "already-sent" };
   }
 
+  // Säkerhet: skicka aldrig en gissad kod. Bokningar som inte har bekräftad fysisk
+  // sjöbod (via uppladdad ankomstlista eller manuellt val) hoppas över i massutskick.
+  // Per-bokning-knappen ("Skicka") använder force och kan fortfarande skicka medvetet.
+  if (a.needs_review && !opts.force) {
+    db.prepare("UPDATE arrivals SET status='skipped', note=?, updated_at=datetime('now') WHERE id=?").run(
+      "Väntar på bekräftad sjöbod – ladda upp ankomstlistan",
+      id,
+    );
+    return { arrivalId: id, guest: a.guest_name ?? "?", channel: "none", status: "skipped" };
+  }
+
   const cabin = a.cabin_id ? getCabin(a.cabin_id) : undefined;
 
   if (!cabin || !cabin.door_code) {

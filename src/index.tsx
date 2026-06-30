@@ -252,11 +252,15 @@ app.post("/send-all", async (c) => {
   prepareArrivals(d);
   // Endast vanliga sjöbods-/villakoder här (paket & cyklar har egna knappar).
   const r = await sendArrivalList(getRegularArrivals(d));
+  const skipNote = r.skipped
+    ? ` ${r.skipped} hoppades över – väntar på bekräftad sjöbod (ladda upp ankomstlistan).`
+    : "";
   return c.redirect(
     redirectFlash(
       `/?date=${d}`,
-      r.failed ? "warn" : "ok",
-      `Skickade ${r.sent} koder, misslyckades ${r.failed}, hoppade ${r.skipped}.` +
+      r.failed || r.skipped ? "warn" : "ok",
+      `Skickade ${r.sent} koder${r.failed ? `, misslyckades ${r.failed}` : ""}.` +
+        skipNote +
         (config.dryRun ? " (testläge – inget riktigt skickades)" : ""),
     ),
   );

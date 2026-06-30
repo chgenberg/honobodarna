@@ -167,6 +167,12 @@ export const TodayPage: FC<TodayProps> = (p) => {
     <Layout title="Idag" active="today" dryRun={p.dryRun}>
       {p.flash ? <div class={`flash ${p.flash.type}`}>{p.flash.msg}</div> : null}
 
+      {p.stats.review > 0 ? (
+        <div class="flash warn">
+          ⚠️ {p.stats.review} bokning{p.stats.review > 1 ? "ar" : ""} saknar bekräftad sjöbod. Ladda upp dagens <strong>Ankomstlista (Excel)</strong> så fylls rätt sjöbod i automatiskt – tills dess skickas <strong>ingen</strong> kod för dessa (för att undvika fel kod till gästen).
+        </div>
+      ) : null}
+
       <p class="eyebrow">Incheckning</p>
       <h1>Dagens gäster</h1>
       <p class="subtitle">
