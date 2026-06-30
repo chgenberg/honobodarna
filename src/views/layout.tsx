@@ -231,6 +231,30 @@ input.code-chip { letter-spacing: .1em; }
 .help { font-size: 13px; color: var(--muted); margin-top: 8px; }
 strong { font-weight: 600; }
 
+/* ── Fullskärms drag-n-drop för ankomstlista ───────────────── */
+.upload-overlay {
+  position: fixed; inset: 0; z-index: 200; display: none;
+  align-items: center; justify-content: center; padding: 24px;
+  background: rgba(18, 59, 77, .55); backdrop-filter: blur(5px);
+  animation: fade .18s var(--ease) both;
+}
+.upload-overlay.show { display: flex; }
+.upload-box {
+  pointer-events: none; text-align: center; background: var(--paper);
+  border: 2.5px dashed var(--sea); border-radius: 22px; padding: 52px 72px;
+  box-shadow: 0 24px 60px rgba(18, 59, 77, .28); max-width: 460px;
+}
+.upload-box h2 { font-size: 22px; margin: 6px 0 8px; }
+.upload-box p { color: var(--muted); font-size: 14px; margin: 0; }
+.upload-icon {
+  width: 64px; height: 64px; margin: 0 auto 14px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--sea-soft, #e9f1f4); color: var(--sea); font-size: 30px;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pulse { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
 /* ── Sjöbod-kort med foto ───────────────────────────────── */
 .cabin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-bottom: 24px; }
 @media (max-width: 900px) { .cabin-grid { grid-template-columns: repeat(2, 1fr); } }

@@ -7,6 +7,7 @@ import cron from "node-cron";
 import { config } from "./config.js";
 import { db, getSetting, setSetting } from "./db.js";
 import { getBikeSends, sendBikeFor } from "./bikes.js";
+import { parseAndApplyArrivalList, countAssignmentsForDate } from "./uploads.js";
 import {
   getAllTemplates,
   getTemplate,
@@ -164,6 +165,7 @@ app.get("/", (c) => {
       stats={stats}
       hiddenCount={countRoomlessForDate(d)}
       bikes={getBikeSends(d)}
+      uploadedCount={countAssignmentsForDate(d)}
     />,
   );
 });
@@ -179,6 +181,33 @@ app.post("/run", async (c) => {
   } catch (err) {
     return c.redirect(redirectFlash(`/?date=${d}`, "err", "Synk misslyckades: " + msg(err)));
   }
+});
+
+// Uppladdning av Annas ankomstlista (Excel) → kopplar bokning → fysisk sjöbod.
+app.post("/upload-arrivals", async (c) => {
+  const body = await c.req.parseBody();
+  const file = body["file"] as { arrayBuffer?: () => Promise<ArrayBuffer> } | undefined;
+  if (!file || typeof file.arrayBuffer !== "function") {
+    return c.json({ ok: false, error: "Ingen fil mottagen." }, 400);
+  }
+  let summary;
+  try {
+    const buf = Buffer.from(await file.arrayBuffer());
+    summary = parseAndApplyArrivalList(buf);
+  } catch (err) {
+    return c.json({ ok: false, error: "Kunde inte läsa filen: " + msg(err) }, 400);
+  }
+  // Applicera tilldelningarna: förbered om dagens + uppladdade datum (kör om matchningen).
+  const date = c.req.query("date") || todayInTz();
+  const dates = new Set<string>([date, ...summary.dates]);
+  for (const d of dates) {
+    try {
+      prepareArrivals(d);
+    } catch {
+      /* hoppa över datum utan ankomster */
+    }
+  }
+  return c.json({ ok: true, ...summary });
 });
 
 app.post("/assign", async (c) => {

@@ -128,6 +128,20 @@ CREATE TABLE IF NOT EXISTS bike_sends (
   UNIQUE (booking_code, notify_date)
 );
 
+-- Rumstilldelningar uppladdade från Annas ankomstlista (Excel). Auktoritativ källa
+-- för vilken fysisk sjöbod en gäst fått (det API:t inte exponerar).
+CREATE TABLE IF NOT EXISTS room_assignments (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  booking_code TEXT NOT NULL,
+  arrival_date TEXT,
+  room_name    TEXT,                              -- "Sjöbod 2" från Excelen
+  cabin_id     INTEGER REFERENCES cabins(id) ON DELETE SET NULL,
+  guest_name   TEXT,
+  source       TEXT NOT NULL DEFAULT 'upload',
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (booking_code, arrival_date)
+);
+
 -- Permanent kundregister (aggregeras från bokningarna, överlever rensning av gamla bokningar).
 CREATE TABLE IF NOT EXISTS customers (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,

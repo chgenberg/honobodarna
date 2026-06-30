@@ -22,14 +22,18 @@ console.log("Seedar sjöbodar…");
 db.prepare("DELETE FROM cabins").run();
 const SJOBOD_CAP = "Max 6 personer · 50 m²";
 const VILLA_CAP = "Max 8 personer · 120 m²";
+// Fysisk verklighet (7 enheter). Namnen MÅSTE matcha "Tilldelat rum" i BookVisits
+// ankomstlista (Excel): "Sjöbod 1".."Sjöbod 6" + "Villan".
+//   Sjöbod 1 = djurvänlig · Sjöbod 2-5 = vanlig Sjöbod · Sjöbod 6 = anpassad · Villan
 // [namn, rumstyp-id, etikett, kod, bild, kapacitet]
 const cabins: Array<[string, string, string, string, string, string]> = [
-  ["Sjöbod 1", known.sjobod, types[known.sjobod] ?? "Sjöbod", "1111", "/public/Sjobod.png", SJOBOD_CAP],
-  ["Sjöbod 2", known.sjobod, types[known.sjobod] ?? "Sjöbod", "2222", "/public/Sjobod2.png", SJOBOD_CAP],
-  ["Sjöbod 3", known.sjobod, types[known.sjobod] ?? "Sjöbod", "3333", "/public/Sjobod.png", SJOBOD_CAP],
-  ["Sjöbod djurvänlig", known.djur, types[known.djur] ?? "Sjöbod djurvänlig", "4444", "/public/sjobod_djurvanlig1.png", SJOBOD_CAP],
-  ["Sjöbod anpassad", known.anpassad, types[known.anpassad] ?? "Anpassad", "5555", "/public/Sjobod2.png", SJOBOD_CAP],
-  ["Villan", known.villa, types[known.villa] ?? "Villa", "6666", "/public/Villa.png", VILLA_CAP],
+  ["Sjöbod 1", known.djur, types[known.djur] ?? "Sjöbod djurvänlig", "1111", "/public/sjobod_djurvanlig1.png", SJOBOD_CAP],
+  ["Sjöbod 2", known.sjobod, types[known.sjobod] ?? "Sjöbod", "2222", "/public/Sjobod.png", SJOBOD_CAP],
+  ["Sjöbod 3", known.sjobod, types[known.sjobod] ?? "Sjöbod", "3333", "/public/Sjobod2.png", SJOBOD_CAP],
+  ["Sjöbod 4", known.sjobod, types[known.sjobod] ?? "Sjöbod", "4444", "/public/Sjobod.png", SJOBOD_CAP],
+  ["Sjöbod 5", known.sjobod, types[known.sjobod] ?? "Sjöbod", "5555", "/public/Sjobod2.png", SJOBOD_CAP],
+  ["Sjöbod 6", known.anpassad, types[known.anpassad] ?? "Sjöbod tillgänglighetsanpassad", "6666", "/public/Sjobod.png", SJOBOD_CAP],
+  ["Villan", known.villa, types[known.villa] ?? "Villa", "7777", "/public/Villa.png", VILLA_CAP],
 ];
 const insCabin = db.prepare(
   `INSERT INTO cabins (name, bookvisit_room_id, room_type_label, door_code, image_url, capacity, sort_order)

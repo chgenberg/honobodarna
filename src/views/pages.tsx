@@ -159,6 +159,7 @@ interface TodayProps {
   stats: { total: number; sent: number; pending: number; review: number };
   hiddenCount?: number;
   bikes: BikeRow[];
+  uploadedCount?: number;
 }
 
 export const TodayPage: FC<TodayProps> = (p) => {
@@ -200,12 +201,19 @@ export const TodayPage: FC<TodayProps> = (p) => {
             Skicka alla koder nu{p.dryRun ? " (test)" : ""}
           </button>
         </form>
+        <button type="button" class="btn" id="alUploadBtn">⤓ Ladda upp ankomstlista</button>
         <div class="spacer" />
         <form method="get" action="/" class="inline-form toolbar">
           <input type="date" name="date" value={p.date} />
           <button class="btn small" type="submit">Visa datum</button>
         </form>
       </div>
+
+      <p class="help" style="margin-top:-6px;">
+        {p.uploadedCount
+          ? `✓ Ankomstlista uppladdad – ${p.uploadedCount} stuga${p.uploadedCount > 1 ? "/stugor" : ""} tilldelad${p.uploadedCount > 1 ? "e" : ""} från Excel för det här datumet.`
+          : "Tips: ladda upp dagens Ankomstlista (Excel) från BookVisit så fylls rätt sjöbod i automatiskt. Dra filen var som helst på sidan."}
+      </p>
 
       <div class="card">
         <ArrivalTable arrivals={p.arrivals} cabins={p.cabins} date={p.date} emptyText="Inga incheckningar för det här datumet." />
@@ -298,6 +306,47 @@ export const TodayPage: FC<TodayProps> = (p) => {
           Automatiskt morgonutskick är AV – koderna förbereds på morgonen men du trycker själv på "Skicka". Slå på i Inställningar.
         </p>
       )}
+
+      <input type="file" id="alFile" accept=".xlsx,.xls" style="display:none" />
+      <div id="alOverlay" class="upload-overlay">
+        <div class="upload-box">
+          <div class="upload-icon">⤓</div>
+          <h2 id="alTitle">Släpp ankomstlistan här</h2>
+          <p>Excel-fil (.xlsx) från BookVisit · datum {p.date}</p>
+        </div>
+      </div>
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `(function(){
+  var date=${JSON.stringify(p.date)};
+  var input=document.getElementById('alFile');
+  var overlay=document.getElementById('alOverlay');
+  var title=document.getElementById('alTitle');
+  var btn=document.getElementById('alUploadBtn');
+  var depth=0;
+  function show(){overlay.classList.add('show');}
+  function hide(){overlay.classList.remove('show');}
+  if(btn)btn.addEventListener('click',function(){input.click();});
+  window.addEventListener('dragenter',function(e){e.preventDefault();depth++;show();});
+  window.addEventListener('dragover',function(e){e.preventDefault();});
+  window.addEventListener('dragleave',function(e){depth--;if(depth<=0){depth=0;hide();}});
+  window.addEventListener('drop',function(e){e.preventDefault();depth=0;var f=e.dataTransfer&&e.dataTransfer.files[0];if(f){upload(f);}else{hide();}});
+  input.addEventListener('change',function(){if(input.files[0])upload(input.files[0]);});
+  function go(msg,ok){location.href='/?date='+encodeURIComponent(date)+'&flash='+encodeURIComponent(msg)+'&ft='+(ok?'ok':'err');}
+  function upload(file){
+    show();title.textContent='Laddar upp & matchar…';
+    var fd=new FormData();fd.append('file',file);
+    fetch('/upload-arrivals?date='+encodeURIComponent(date),{method:'POST',body:fd})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(j&&j.ok){var m=j.assigned+' av '+j.rows+' rader kopplade till rätt sjöbod'+(j.unresolved&&j.unresolved.length?(' · okända rum: '+j.unresolved.join(', ')):'');go(m,true);}
+        else{go((j&&j.error)||'Kunde inte läsa filen',false);}
+      })
+      .catch(function(){go('Uppladdningen misslyckades',false);});
+  }
+})();`,
+        }}
+      />
     </Layout>
   );
 };

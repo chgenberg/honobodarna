@@ -33,37 +33,55 @@ export function assignCabinsForDate(date: string): void {
   const cabins = listCabins();
   const arrivals = db
     .prepare(
-      `SELECT id, room_id, cabin_id, status FROM arrivals
+      `SELECT id, booking_code, room_id, cabin_id, status FROM arrivals
        WHERE arrival_date = ? ORDER BY id`,
     )
-    .all(date) as Array<{ id: number; room_id: string | null; cabin_id: number | null; status: string }>;
-
-  // Stugor redan upptagna denna dag (manuellt valda eller redan skickade).
-  const taken = new Set<number>(
-    arrivals.filter((a) => a.cabin_id != null).map((a) => a.cabin_id as number),
-  );
+    .all(date) as Array<{
+    id: number;
+    booking_code: string;
+    room_id: string | null;
+    cabin_id: number | null;
+    status: string;
+  }>;
 
   const update = db.prepare(
     "UPDATE arrivals SET cabin_id = ?, needs_review = ?, updated_at = datetime('now') WHERE id = ?",
   );
+  const getUpload = db.prepare(
+    "SELECT cabin_id FROM room_assignments WHERE booking_code = ? AND (arrival_date = ? OR arrival_date IS NULL) ORDER BY arrival_date DESC LIMIT 1",
+  );
 
+  const taken = new Set<number>();
+
+  // Pass 1: uppladdad ankomstlista är auktoritativ (överstyr gissning och manuellt val).
   for (const a of arrivals) {
-    if (a.cabin_id != null) continue; // redan tilldelad/överstyrd – rör inte
-    if (a.status === "sent") continue;
+    if (a.status === "sent") {
+      if (a.cabin_id != null) taken.add(a.cabin_id);
+      continue;
+    }
+    const up = getUpload.get(a.booking_code, date) as { cabin_id: number | null } | undefined;
+    if (up && up.cabin_id != null) {
+      update.run(up.cabin_id, 0, a.id);
+      a.cabin_id = up.cabin_id;
+      taken.add(up.cabin_id);
+    } else if (a.cabin_id != null) {
+      taken.add(a.cabin_id); // behåll manuellt val
+    }
+  }
+
+  // Pass 2: auto-tilldela resten (varken uppladdat eller manuellt val).
+  for (const a of arrivals) {
+    if (a.status === "sent" || a.cabin_id != null) continue;
 
     const sameType = cabins.filter((c) => c.bookvisit_room_id && c.bookvisit_room_id === a.room_id);
     const free = sameType.filter((c) => !taken.has(c.id));
 
     if (sameType.length === 0) {
-      // Ingen stuga mappad mot denna rumstyp – kräver granskning.
       update.run(null, 1, a.id);
       continue;
     }
-
     const chosen = free[0] ?? sameType[0];
     taken.add(chosen.id);
-    // Granskning behövs om typen har flera fysiska stugor (tvetydig matchning).
-    const needsReview = sameType.length > 1 ? 1 : 0;
-    update.run(chosen.id, needsReview, a.id);
+    update.run(chosen.id, sameType.length > 1 ? 1 : 0, a.id);
   }
 }
