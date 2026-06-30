@@ -225,6 +225,8 @@ input.code-chip { letter-spacing: .1em; }
 .flash.warn { background: var(--amber-soft); color: var(--amber); border-color: #ecdcb6; }
 .flash.err { background: var(--red-soft); color: var(--red); border-color: #eccfc8; }
 .inline-form { display: inline; }
+/* Toolbar-knappar: varje form/span centrerar sin knapp så alla hamnar på exakt samma lodräta nivå. */
+.toolbar > .inline-form { display: inline-flex; align-items: center; margin: 0; }
 .empty { text-align: center; color: var(--muted); padding: 48px 0; font-size: 15px; }
 .toolbar { display: flex; gap: 11px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
 .toolbar .spacer { flex: 1; }
@@ -345,7 +347,7 @@ strong { font-weight: 600; }
 
   /* Verktygsrader + formulär staplas och blir fullbredd */
   .toolbar { flex-direction: column; align-items: stretch; gap: 9px; }
-  .toolbar form { flex-direction: column; align-items: stretch; width: 100%; }
+  .toolbar form, .toolbar > .inline-form { flex-direction: column; align-items: stretch; width: 100%; }
   .toolbar .spacer { display: none; }
   .toolbar input, .toolbar .select-wrap, .toolbar select, .toolbar .btn { width: 100% !important; }
   .toolbar .select-wrap { min-width: 0 !important; }
