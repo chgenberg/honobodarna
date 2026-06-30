@@ -1,0 +1,36 @@
+name: Hämta BookVisit ankomstlista
+
+# Kör manuellt nu (Actions → "Hämta BookVisit ankomstlista" → Run workflow).
+# Avkommentera schemat när skriptet testats med Annas exakta klick-steg.
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "0 5 * * *" # 05:00 UTC ≈ 07:00 svensk sommartid (06:00 vintertid)
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Hämta & ladda upp ankomstlistan
+        run: npx tsx scripts/fetch-arrival-list.ts
+        env:
+          BOOKVISIT_LOGIN_URL: ${{ secrets.BOOKVISIT_LOGIN_URL }}
+          BOOKVISIT_USER: ${{ secrets.BOOKVISIT_USER }}
+          BOOKVISIT_PASS: ${{ secrets.BOOKVISIT_PASS }}
+          APP_UPLOAD_URL: ${{ secrets.APP_UPLOAD_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          REPORT_URL: ${{ secrets.REPORT_URL }}
+      - name: Spara felskärmdump (vid fel)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-screenshot
+          path: failure.png
+          if-no-files-found: ignore

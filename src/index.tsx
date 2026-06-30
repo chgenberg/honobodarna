@@ -86,6 +86,35 @@ async function handleCron(c: Context) {
 app.get("/api/cron/run", handleCron);
 app.post("/api/cron/run", handleCron);
 
+// Token-skyddad uppladdning av ankomstlistan (för det automatiska Playwright-jobbet).
+// Ligger före inloggningskravet och autentiseras med CRON_SECRET (samma som cron).
+app.post("/api/upload-arrivals", async (c) => {
+  if (!config.cronSecret) return c.json({ ok: false, error: "CRON_SECRET är inte satt" }, 503);
+  if (!cronAuthorized(c)) return c.json({ ok: false, error: "Ogiltig token" }, 401);
+
+  const body = await c.req.parseBody();
+  const file = body["file"] as { arrayBuffer?: () => Promise<ArrayBuffer> } | undefined;
+  if (!file || typeof file.arrayBuffer !== "function") {
+    return c.json({ ok: false, error: "Ingen fil mottagen." }, 400);
+  }
+  let summary;
+  try {
+    summary = parseAndApplyArrivalList(Buffer.from(await file.arrayBuffer()));
+  } catch (err) {
+    return c.json({ ok: false, error: "Kunde inte läsa filen: " + msg(err) }, 400);
+  }
+  const date = c.req.query("date") || todayInTz();
+  for (const d of new Set<string>([date, ...summary.dates])) {
+    try {
+      prepareArrivals(d);
+    } catch {
+      /* hoppa över datum utan ankomster */
+    }
+  }
+  console.log(`[upload-api] ${summary.rows} rader, ${summary.assigned} tilldelade sjöbodar.`);
+  return c.json({ ok: true, ...summary });
+});
+
 // ─── Hjälpare ────────────────────────────────────────────────────────────────
 function flashFrom(c: { req: { query: (k: string) => string | undefined } }) {
   const msg = c.req.query("flash");
