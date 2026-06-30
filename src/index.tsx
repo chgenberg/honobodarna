@@ -8,6 +8,7 @@ import { config } from "./config.js";
 import { db, getSetting, setSetting } from "./db.js";
 import { getBikeSends, sendBikeFor } from "./bikes.js";
 import { parseAndApplyArrivalList, countAssignmentsForDate } from "./uploads.js";
+import { alignCabinNames } from "./cabin-align.js";
 import {
   getAllTemplates,
   getTemplate,
@@ -329,6 +330,18 @@ app.post("/cabins/bike-code", async (c) => {
   const body = await c.req.parseBody();
   setSetting("bike_lock_code", String(body.bike_lock_code ?? "").trim());
   return c.redirect(redirectFlash("/cabins?tab=cyklar", "ok", "Cykelns låskod sparad."));
+});
+
+// Anpassar sjöbodsnamnen till BookVisits ankomstlista (Sjöbod 1-6 + Villan). Säkert: rör inte dörrkoder.
+app.post("/cabins/align-names", async (c) => {
+  const r = alignCabinNames();
+  const parts: string[] = [];
+  if (r.renamed.length) parts.push(`${r.renamed.length} omdöpta`);
+  if (r.created.length) parts.push(`${r.created.length} nya`);
+  if (r.placeholders.length) parts.push(`sätt kod för: ${r.placeholders.join(", ")}`);
+  if (r.leftover.length) parts.push(`granska dubbletter: ${r.leftover.map((x) => x.name).join(", ")}`);
+  const summary = parts.length ? parts.join(" · ") : "Namnen var redan korrekta.";
+  return c.redirect(redirectFlash("/cabins", "ok", "Namn anpassade till ankomstlistan. " + summary));
 });
 
 app.post("/cabins/add", async (c) => {

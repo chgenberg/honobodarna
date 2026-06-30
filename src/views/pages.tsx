@@ -401,6 +401,20 @@ export const CabinsPage: FC<CabinsProps> = (p) => (
       </div>
     ) : (
       <>
+        <div class="card" style="max-width:680px; margin-bottom:18px;">
+          <h2 style="margin-top:0;">Anpassa namn till ankomstlistan</h2>
+          <p class="help" style="margin-top:0;">
+            För att rätt sjöbod ska fyllas i automatiskt när du laddar upp ankomstlistan måste sjöbodarna heta exakt som i BookVisit: <strong>Sjöbod 1–6</strong> + <strong>Villan</strong> (7 enheter, där Sjöbod 1 = djurvänlig och Sjöbod 6 = anpassad). Knappen döper om och skapar enheter vid behov – <strong>dörrkoderna rörs inte</strong>.
+          </p>
+          <form
+            method="post"
+            action="/cabins/align-names"
+            onsubmit="return confirm('Anpassa sjöbodsnamnen till ankomstlistan (Sjöbod 1–6 + Villan)? Dörrkoder behålls. Verifiera koderna efteråt.');"
+          >
+            <button class="btn small primary" type="submit">Anpassa namn (Sjöbod 1–6 + Villan)</button>
+          </form>
+          <p class="help">Efteråt: kontrollera att varje sjöbods kod stämmer med rätt fysisk dörr.</p>
+        </div>
         {p.cabins.length === 0 ? (
           <div class="card">
             <div class="empty">Inga sjöbodar tillagda ännu. Lägg till dem nedan.</div>
