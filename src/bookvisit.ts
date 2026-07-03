@@ -131,11 +131,23 @@ export function normalizePhone(
   countryCode?: string | null,
 ): string | null {
   if (!phone) return null;
-  let p = phone.replace(/[\s\-()]/g, "").trim();
+  // Behåll bara siffror och ledande + (BookVisit-nummer kan innehålla osynliga
+  // Unicode-styrtecken, mellanslag, bindestreck, parenteser m.m.).
+  const hasPlus = phone.trim().startsWith("+") || /^\s*00/.test(phone);
+  let p = phone.replace(/[^\d]/g, "");
   if (!p) return null;
+  if (p.startsWith("00")) p = p.slice(2);
+  else if (!hasPlus) {
+    // föll igenom – hanteras nedan som nationellt nummer
+  }
+  if (hasPlus) p = "+" + p;
   // Uppenbara testnummer ("00000000") räknas som ogiltiga.
-  if (/^0+$/.test(p)) return null;
-  if (p.startsWith("+")) return p;
+  if (/^\+?0+$/.test(p)) return null;
+  if (p.startsWith("+")) {
+    // Släng kvarlämnad riksnolla efter landskoden ("+46 070..." → "+4670...").
+    p = p.replace(/^\+(46|47|45|49|44|33|31|358)0(?=\d)/, "+$1");
+    return p;
+  }
   if (p.startsWith("00")) return "+" + p.slice(2);
   const cc = (countryCode ?? "").replace(/[^\d]/g, "");
   if (p.startsWith("0")) {
