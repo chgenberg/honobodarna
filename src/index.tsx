@@ -7,7 +7,7 @@ import cron from "node-cron";
 import { config } from "./config.js";
 import { db, getSetting, setSetting } from "./db.js";
 import { getBikeSends, sendBikeFor } from "./bikes.js";
-import { parseAndApplyArrivalList, countAssignmentsForDate } from "./uploads.js";
+import { parseAndApplyArrivalList, applyAssignments, countAssignmentsForDate } from "./uploads.js";
 import { alignCabinNames } from "./cabin-align.js";
 import {
   getAllTemplates,
@@ -88,20 +88,36 @@ app.post("/api/cron/run", handleCron);
 
 // Token-skyddad uppladdning av ankomstlistan (för det automatiska Playwright-jobbet).
 // Ligger före inloggningskravet och autentiseras med CRON_SECRET (samma som cron).
+// Tar emot antingen multipart (Excel-fil) eller JSON { assignments: [...] } (skrapad tabell).
 app.post("/api/upload-arrivals", async (c) => {
   if (!config.cronSecret) return c.json({ ok: false, error: "CRON_SECRET är inte satt" }, 503);
   if (!cronAuthorized(c)) return c.json({ ok: false, error: "Ogiltig token" }, 401);
 
-  const body = await c.req.parseBody();
-  const file = body["file"] as { arrayBuffer?: () => Promise<ArrayBuffer> } | undefined;
-  if (!file || typeof file.arrayBuffer !== "function") {
-    return c.json({ ok: false, error: "Ingen fil mottagen." }, 400);
-  }
   let summary;
   try {
-    summary = parseAndApplyArrivalList(Buffer.from(await file.arrayBuffer()));
+    if ((c.req.header("content-type") ?? "").includes("application/json")) {
+      const json = (await c.req.json()) as { assignments?: unknown };
+      if (!Array.isArray(json.assignments) || json.assignments.length === 0) {
+        return c.json({ ok: false, error: "Inga assignments i JSON-kroppen." }, 400);
+      }
+      summary = applyAssignments(
+        json.assignments.map((a: Record<string, unknown>) => ({
+          bookingCode: String(a.bookingCode ?? ""),
+          room: String(a.room ?? ""),
+          date: String(a.date ?? ""),
+          guest: String(a.guest ?? ""),
+        })),
+      );
+    } else {
+      const body = await c.req.parseBody();
+      const file = body["file"] as { arrayBuffer?: () => Promise<ArrayBuffer> } | undefined;
+      if (!file || typeof file.arrayBuffer !== "function") {
+        return c.json({ ok: false, error: "Ingen fil mottagen." }, 400);
+      }
+      summary = parseAndApplyArrivalList(Buffer.from(await file.arrayBuffer()));
+    }
   } catch (err) {
-    return c.json({ ok: false, error: "Kunde inte läsa filen: " + msg(err) }, 400);
+    return c.json({ ok: false, error: "Kunde inte läsa datan: " + msg(err) }, 400);
   }
   const date = c.req.query("date") || todayInTz();
   for (const d of new Set<string>([date, ...summary.dates])) {

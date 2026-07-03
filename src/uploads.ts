@@ -60,23 +60,25 @@ const upsertAssignment = db.prepare(`
     guest_name=excluded.guest_name, created_at=datetime('now')
 `);
 
-// Parsar en uppladdad ankomstlista (Excel) och sparar rumstilldelningarna.
-export function parseAndApplyArrivalList(buffer: Buffer): UploadSummary {
-  const wb = XLSX.read(buffer, { type: "buffer" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: "" });
+export interface AssignmentInput {
+  bookingCode: string;
+  room: string;
+  date: string;
+  guest: string;
+}
 
+// Sparar en lista rumstilldelningar (från Excel eller skrapad tabell).
+export function applyAssignments(items: AssignmentInput[]): UploadSummary {
   let assigned = 0;
   const unresolved = new Set<string>();
   const dates = new Set<string>();
 
   const tx = db.transaction(() => {
-    for (const row of rows) {
-      const bookingCode = pick(row, ["bokning", "booking", "reservation"]);
-      const room = pick(row, ["tilldelat rum", "rum", "room", "cabin", "stuga"]);
-      const date = toDate(pick(row, ["ankomst", "arrival"]));
-      const guest = pick(row, ["gästnamn", "namn", "name", "guest"]);
+    for (const it of items) {
+      const bookingCode = it.bookingCode.trim();
       if (!bookingCode) continue;
+      const room = it.room.trim();
+      const date = toDate(it.date.trim());
       const cabinId = resolveCabinId(room);
       if (room && cabinId == null) unresolved.add(room);
       if (cabinId != null) assigned++;
@@ -86,18 +88,34 @@ export function parseAndApplyArrivalList(buffer: Buffer): UploadSummary {
         arrival_date: date || null,
         room_name: room || null,
         cabin_id: cabinId,
-        guest_name: guest || null,
+        guest_name: it.guest.trim() || null,
       });
     }
   });
   tx();
 
   return {
-    rows: rows.length,
+    rows: items.length,
     assigned,
     unresolved: [...unresolved],
     dates: [...dates],
   };
+}
+
+// Parsar en uppladdad ankomstlista (Excel) och sparar rumstilldelningarna.
+export function parseAndApplyArrivalList(buffer: Buffer): UploadSummary {
+  const wb = XLSX.read(buffer, { type: "buffer" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: "" });
+
+  return applyAssignments(
+    rows.map((row) => ({
+      bookingCode: pick(row, ["bokning", "booking", "reservation"]),
+      room: pick(row, ["tilldelat rum", "rum", "room", "cabin", "stuga"]),
+      date: pick(row, ["ankomst", "arrival"]),
+      guest: pick(row, ["gästnamn", "namn", "name", "guest"]),
+    })),
+  );
 }
 
 export function getAssignment(bookingCode: string, date: string): { cabin_id: number | null; room_name: string | null } | undefined {
