@@ -1,5 +1,5 @@
 import { db } from "./db.js";
-import { getArrivalsForDate, syncBookings } from "./bookvisit.js";
+import { getArrivalsForDate, syncBookings, normalizePhone } from "./bookvisit.js";
 import { assignCabinsForDate, getCabin } from "./matching.js";
 import { sendSms } from "./sms.js";
 import { sendEmail } from "./email.js";
@@ -48,7 +48,9 @@ export function prepareArrivals(date: string): ArrivalRow[] {
         booking_code: c.booking_code,
         booking_guid: c.booking_guid,
         guest_name: c.guest_name,
-        phone: c.phone,
+        // Re-normalisera vid varje förberedelse så att äldre cachade nummer
+        // (t.ex. med osynliga Unicode-tecken) också städas.
+        phone: normalizePhone(c.phone),
         email: c.email,
         room_id: c.room_id,
         room_type_label: c.room_type_label,
