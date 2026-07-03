@@ -16,15 +16,9 @@
 //   CRON_SECRET                      samma token som i appen
 // Valfria:
 //   BOOKVISIT_LOGIN_URL              default https://admin.bookvisit.com/Account/Login
+//   ARRIVAL_DATE                     YYYY-MM-DD (default = idag i Europe/Stockholm)
 //   HEADFUL=1                        synlig webbläsare vid lokal felsökning
 import { chromium, type Page } from "playwright";
-
-// Körs i webbläsaren via page.evaluate – projektet saknar DOM-typer.
-interface MiniEl {
-  textContent: string | null;
-  querySelectorAll(sel: string): Iterable<MiniEl>;
-}
-declare const document: MiniEl;
 
 function need(name: string): string {
   const v = process.env[name];
@@ -36,6 +30,18 @@ function need(name: string): string {
 }
 
 const LOGIN_URL = process.env.BOOKVISIT_LOGIN_URL || "https://admin.bookvisit.com/Account/Login";
+
+function todayStockholm(): string {
+  // sv-SE ger YYYY-MM-DD
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Stockholm",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+const targetDate = process.env.ARRIVAL_DATE || todayStockholm();
 
 interface ScrapedRow {
   bookingCode: string;
@@ -54,39 +60,81 @@ async function login(page: Page) {
   const userField = page.locator('input[type="email"], input[name*="mail" i], input[name*="user" i], input[type="text"]').first();
   await userField.fill(need("BOOKVISIT_USER"));
   await page.locator('input[type="password"]').first().fill(need("BOOKVISIT_PASS"));
+  // "Fortsätt" är en <a>-länk på BookVisits inloggningssida, inte en <button>.
   await Promise.all([
     page.waitForLoadState("networkidle"),
-    page.getByRole("button", { name: /fortsätt|logga in|log in|continue/i }).first().click(),
+    page
+      .locator('a:has-text("Fortsätt"), button:has-text("Fortsätt"), button[type="submit"], input[type="submit"]')
+      .first()
+      .click(),
   ]);
-  // Verifiera att vi är inloggade (fliken Frontdesk syns i toppmenyn).
-  await page.getByText("Frontdesk", { exact: false }).first().waitFor({ timeout: 30_000 });
+  // Verifiera att vi är inloggade (URL:en lämnar login-sidan).
+  await page.waitForURL((u) => !u.pathname.toLowerCase().includes("/account/login"), { timeout: 30_000 });
   console.log("✓ Inloggad.");
 }
 
 async function openArrivals(page: Page) {
-  // Fliken "Frontdesk" i toppmenyn.
-  await page.getByText("Frontdesk", { exact: false }).first().click();
-  await page.waitForLoadState("networkidle");
-
-  // Sidomenyn: "Operations"-ikonen (tooltip/text), sedan "Ankomster".
-  const operations = page.locator('[title="Operations"], a:has-text("Operations"), [aria-label="Operations"]').first();
-  await operations.click();
-  await page.getByText("Ankomster", { exact: false }).first().click();
+  // Frontdesk-modulen, sedan sidomenyns accordion "Operations" → "Ankomster".
+  await page.goto("https://admin.bookvisit.com/frontdesk/index", { waitUntil: "networkidle" });
+  await page.locator('button.section:has-text("Operations")').first().click();
+  await page.locator('.nav-sidebar a:has-text("Ankomster")').first().click();
   await page.waitForLoadState("networkidle");
   // Vänta in tabellen med kolumnen "Tilldelat rum".
   await page.getByText("Tilldelat rum", { exact: false }).first().waitFor({ timeout: 30_000 });
   console.log(`✓ Ankomster-sidan laddad: ${page.url()}`);
 }
 
+const SV_MONTHS = [
+  "januari", "februari", "mars", "april", "maj", "juni",
+  "juli", "augusti", "september", "oktober", "november", "december",
+];
+
+// Väljer dagens datum i react-date-range-kalendern. Viktigt: sidan öppnar med
+// anläggningens "nuvarande arbetsdag" (nattrevision körs ej) – inte dagens datum.
+async function setDate(page: Page, target: string) {
+  const [y, m, d] = target.split("-").map(Number);
+
+  // Öppna datumväljaren (knappen uppe till höger, t.ex. "Lör 13 Sep.").
+  await page
+    .locator("button")
+    .filter({ hasText: /jan|feb|mar|apr|maj|jun|jul|aug|sep|okt|nov|dec/i })
+    .filter({ hasText: /\d/ })
+    .first()
+    .click();
+  const header = page.locator(".rdrMonthAndYearPickers").first();
+  await header.waitFor({ timeout: 15_000 });
+
+  // Bläddra till rätt månad (max 36 klick som skydd mot evighetsloop).
+  for (let i = 0; i < 36; i++) {
+    const txt = ((await header.textContent()) ?? "").trim().toLowerCase();
+    const match = txt.match(/^(\S+)\s+(\d{4})$/);
+    if (!match) throw new Error(`Oväntad kalenderrubrik: "${txt}"`);
+    const cur = new Date(Number(match[2]), SV_MONTHS.indexOf(match[1]), 1);
+    const want = new Date(y, m - 1, 1);
+    if (cur.getTime() === want.getTime()) break;
+    await page.locator(cur < want ? ".rdrNextButton" : ".rdrPprevButton").first().click();
+    await page.waitForTimeout(250);
+  }
+
+  // Klicka på dagen (hoppa över dagar från intilliggande månader).
+  await page
+    .locator(`.rdrDay:not(.rdrDayPassive):has(.rdrDayNumber span:text-is("${d}"))`)
+    .first()
+    .click();
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1500);
+  console.log(`✓ Datum valt: ${target}`);
+}
+
 async function scrapeTable(page: Page): Promise<ScrapedRow[]> {
   // Läser tabellen generiskt: hittar kolumnindex via rubrikerna, plockar sedan raderna.
-  const rows = await page.evaluate(() => {
-    const norm = (s: string) => s.trim().toLowerCase();
-    const tables = Array.from(document.querySelectorAll("table"));
-    for (const table of tables) {
-      const headers = Array.from(table.querySelectorAll("thead th, tr:first-child th")).map((th) =>
-        norm(th.textContent ?? ""),
-      );
+  // OBS: skickas som sträng – tsx/esbuild injicerar annars en __name-hjälpare
+  // som inte finns i webbläsarkontexten (ReferenceError: __name is not defined).
+  const rows = (await page.evaluate(`(() => {
+    const norm = (s) => s.trim().toLowerCase();
+    for (const table of Array.from(document.querySelectorAll("table"))) {
+      const headers = Array.from(table.querySelectorAll("thead th, tr:first-child th"))
+        .map((th) => norm(th.textContent || ""));
       const idx = {
         guest: headers.findIndex((h) => h.includes("gästnamn") || h.includes("guest")),
         date: headers.findIndex((h) => h.includes("ankomst") || h.includes("arrival")),
@@ -94,24 +142,23 @@ async function scrapeTable(page: Page): Promise<ScrapedRow[]> {
         code: headers.findIndex((h) => h.includes("boknings") || h.includes("booking")),
       };
       if (idx.room < 0 || idx.code < 0) continue; // fel tabell
-
-      const out: Array<{ bookingCode: string; room: string; date: string; guest: string }> = [];
+      const out = [];
       for (const tr of Array.from(table.querySelectorAll("tbody tr"))) {
-        const cells = Array.from(tr.querySelectorAll("td")).map((td) => (td.textContent ?? "").trim());
+        const cells = Array.from(tr.querySelectorAll("td")).map((td) => (td.textContent || "").trim());
         if (cells.length < headers.length - 1) continue; // summeringsrad ("Totalt:")
-        const bookingCode = cells[idx.code] ?? "";
+        const bookingCode = cells[idx.code] || "";
         if (!/^[A-Z0-9]{6,}$/.test(bookingCode)) continue;
         out.push({
           bookingCode,
-          room: idx.room >= 0 ? (cells[idx.room] ?? "") : "",
-          date: idx.date >= 0 ? (cells[idx.date] ?? "") : "",
-          guest: idx.guest >= 0 ? (cells[idx.guest] ?? "") : "",
+          room: idx.room >= 0 ? (cells[idx.room] || "") : "",
+          date: idx.date >= 0 ? (cells[idx.date] || "") : "",
+          guest: idx.guest >= 0 ? (cells[idx.guest] || "") : "",
         });
       }
       return out;
     }
     return [];
-  });
+  })()`)) as ScrapedRow[];
   console.log(`✓ Läste ${rows.length} rader ur tabellen.`);
   for (const r of rows) console.log(`   ${r.bookingCode}  ${r.date}  ${r.room}  (${r.guest})`);
   return rows;
@@ -140,7 +187,7 @@ async function uploadToApp(rows: ScrapedRow[]) {
 }
 
 (async () => {
-  console.log("Hämtar ankomstlista från BookVisit Frontdesk…");
+  console.log(`Hämtar ankomstlista för ${targetDate} från BookVisit Frontdesk…`);
   const browser = await chromium.launch({ headless: !process.env.HEADFUL });
   const ctx = await browser.newContext({ locale: "sv-SE", timezoneId: "Europe/Stockholm" });
   const page = await ctx.newPage();
@@ -148,14 +195,17 @@ async function uploadToApp(rows: ScrapedRow[]) {
   try {
     await login(page);
     await openArrivals(page);
+    await setDate(page, targetDate);
     const rows = await scrapeTable(page);
-    if (rows.length === 0) {
+    // Skydd: skicka bara rader för det valda datumet (om datumkolumnen finns).
+    const filtered = rows.filter((r) => !r.date || r.date === targetDate);
+    if (filtered.length === 0) {
       // Inga ankomster idag är helt normalt – men logga för säkerhets skull.
       await shot(page, "empty-table");
       console.log("Inga ankomstrader hittades (kan vara en dag utan incheckningar).");
       return;
     }
-    await uploadToApp(rows);
+    await uploadToApp(filtered);
   } catch (err) {
     await shot(page, "failure");
     console.error("Fel:", err instanceof Error ? err.message : err);
