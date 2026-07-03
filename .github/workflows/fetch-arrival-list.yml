@@ -1,11 +1,12 @@
 name: Hämta BookVisit ankomstlista
 
-# Kör manuellt först (Actions → "Hämta BookVisit ankomstlista" → Run workflow).
-# Avkommentera schemat när testkörningen lyckats.
+# Hämtar bodtilldelningarna automatiskt varje morgon; kan även köras manuellt
+# (Actions → "Hämta BookVisit ankomstlista" → Run workflow).
 on:
   workflow_dispatch:
-  # schedule:
-  #   - cron: "0 4 * * *" # 04:00 UTC ≈ 06:00 svensk sommartid (05:00 vintertid)
+  schedule:
+    - cron: "0 4 * * *" # 04:00 UTC ≈ 06:00 svensk sommartid (05:00 vintertid)
+    - cron: "0 6 * * *" # extra körning 2h senare som hämtar ev. sena ändringar
 
 jobs:
   fetch:
