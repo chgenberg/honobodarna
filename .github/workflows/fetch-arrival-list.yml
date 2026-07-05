@@ -2,11 +2,13 @@ name: Hämta BookVisit ankomstlista
 
 # Hämtar bodtilldelningarna automatiskt varje morgon; kan även köras manuellt
 # (Actions → "Hämta BookVisit ankomstlista" → Run workflow).
+# Udda minuter (:17) minskar GitHubs kö-fördröjning vid hel timme markant.
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 4 * * *" # 04:00 UTC ≈ 06:00 svensk sommartid (05:00 vintertid)
-    - cron: "0 6 * * *" # extra körning 2h senare som hämtar ev. sena ändringar
+    - cron: "17 3 * * *" # ≈ 05:17 svensk sommartid – före morgonjobbet kl 07:00
+    - cron: "17 5 * * *" # ≈ 07:17 – fångar sena ändringar efter morgonjobbet
+    - cron: "17 7 * * *" # ≈ 09:17 – extra skyddsnät innan Anna skickar
 
 jobs:
   fetch:
