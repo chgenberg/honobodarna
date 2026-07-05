@@ -9,6 +9,7 @@ import { db, getSetting, setSetting } from "./db.js";
 import { getBikeSends, sendBikeFor } from "./bikes.js";
 import { parseAndApplyArrivalList, applyAssignments, countAssignmentsForDate } from "./uploads.js";
 import { alignCabinNames } from "./cabin-align.js";
+import { sendDailySummary } from "./notify.js";
 import {
   getAllTemplates,
   getTemplate,
@@ -297,8 +298,9 @@ app.post("/send-all", async (c) => {
   prepareArrivals(d);
   // Endast vanliga sjöbods-/villakoder här (paket & cyklar har egna knappar).
   const r = await sendArrivalList(getRegularArrivals(d));
+  sendDailySummary(d).catch((e) => console.error("[send-all] Bekräftelsemejl:", e));
   const skipNote = r.skipped
-    ? ` ${r.skipped} hoppades över – väntar på bekräftad sjöbod (ladda upp ankomstlistan).`
+    ? ` ${r.skipped} hoppades över – väntar på bekräftad sjöbod (välj sjöbod eller ladda upp ankomstlistan).`
     : "";
   return c.redirect(
     redirectFlash(
@@ -316,6 +318,7 @@ app.post("/packages/send-all", async (c) => {
   const d = String(body.date ?? "") || todayInTz();
   prepareArrivals(d);
   const r = await sendArrivalList(getPackageArrivals(d));
+  sendDailySummary(d).catch((e) => console.error("[packages/send-all] Bekräftelsemejl:", e));
   return c.redirect(
     redirectFlash(
       `/?date=${d}`,

@@ -80,6 +80,9 @@ export const config = {
     from: str("EMAIL_FROM", "Hönö Sjöbodar <anna@pegonia.se>"),
   },
 
+  // Driftmejl: varningar (otilldelade sjöbodar) och dagliga utskicksbekräftelser.
+  alertEmail: str("ALERT_EMAIL", "info@honosjobodar.se"),
+
   dryRun: bool("DRY_RUN", true),
   canaryPhone: str("CANARY_PHONE"),
   canaryEmail: str("CANARY_EMAIL"),

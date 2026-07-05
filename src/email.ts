@@ -20,6 +20,27 @@ function getTransporter(): nodemailer.Transporter | null {
   return transporter;
 }
 
+// Driftmejl (varningar/bekräftelser till receptionen). Går ALLTID till angiven
+// adress – ingen canary-omdirigering. Respekterar DRY_RUN (loggar bara då).
+export async function sendOpsEmail(to: string, subject: string, body: string): Promise<boolean> {
+  if (config.dryRun) {
+    console.log(`[ops-mail dry-run] Till: ${to} | ${subject}\n${body}`);
+    return true;
+  }
+  const tx = getTransporter();
+  if (!tx) {
+    console.error("[ops-mail] SMTP saknas – kan inte skicka driftmejl.");
+    return false;
+  }
+  try {
+    await tx.sendMail({ from: config.smtp.from, to, subject, text: body });
+    return true;
+  } catch (err) {
+    console.error("[ops-mail] Misslyckades:", err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
 // Skickar e-post via SMTP. Respekterar DRY_RUN och CANARY_EMAIL.
 export async function sendEmail(
   toRaw: string,

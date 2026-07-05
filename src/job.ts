@@ -6,6 +6,7 @@ import { sendEmail } from "./email.js";
 import { config } from "./config.js";
 import { todayInTz } from "./dates.js";
 import { runBikeNotifications, type BikeJobResult } from "./bikes.js";
+import { sendReviewAlert, sendDailySummary } from "./notify.js";
 import { getTemplate, langForPhone, render } from "./templates.js";
 
 export interface ArrivalRow {
@@ -218,6 +219,16 @@ export async function runMorningJob(opts: {
   const arrivals = prepareArrivals(date);
   const outcomes: SendOutcome[] = [];
 
+  // Morgonkörningen (cron): varna receptionen per mejl om sjöbodar inte kunde
+  // utläsas – systemet gissar aldrig och skickar inget för dessa.
+  if (trigger === "cron") {
+    try {
+      await sendReviewAlert(date);
+    } catch (err) {
+      console.error("[job] Varningsmejl misslyckades:", err);
+    }
+  }
+
   if (shouldSend) {
     for (const a of arrivals) {
       if (a.status === "sent") continue;
@@ -247,6 +258,15 @@ export async function runMorningJob(opts: {
     config.dryRun ? 1 : 0,
     JSON.stringify(outcomes).slice(0, 4000),
   );
+
+  // Bekräftelsemejl efter automatiskt utskick (manuellt utskick mejlar via /send-all).
+  if (shouldSend && outcomes.length > 0) {
+    try {
+      await sendDailySummary(date);
+    } catch (err) {
+      console.error("[job] Bekräftelsemejl misslyckades:", err);
+    }
+  }
 
   return { date, arrivalsFound: arrivals.length, sent, failed, skipped, dryRun: config.dryRun, outcomes, bikes };
 }
