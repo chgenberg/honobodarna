@@ -61,26 +61,29 @@ async function login(page: Page) {
   await userField.fill(need("BOOKVISIT_USER"));
   await page.locator('input[type="password"]').first().fill(need("BOOKVISIT_PASS"));
   // "Fortsätt" är en <a>-länk på BookVisits inloggningssida, inte en <button>.
-  await Promise.all([
-    page.waitForLoadState("networkidle"),
-    page
-      .locator('a:has-text("Fortsätt"), button:has-text("Fortsätt"), button[type="submit"], input[type="submit"]')
-      .first()
-      .click(),
-  ]);
+  await page
+    .locator('a:has-text("Fortsätt"), button:has-text("Fortsätt"), button[type="submit"], input[type="submit"]')
+    .first()
+    .click();
   // Verifiera att vi är inloggade (URL:en lämnar login-sidan).
-  await page.waitForURL((u) => !u.pathname.toLowerCase().includes("/account/login"), { timeout: 30_000 });
+  await page.waitForURL((u) => !u.pathname.toLowerCase().includes("/account/login"), { timeout: 60_000 });
   console.log("✓ Inloggad.");
 }
 
+// OBS: vänta ALDRIG på "networkidle" – BookVisits chatt-widget/analytics håller
+// anslutningar öppna så sidan aldrig blir idle (orsakade dagliga timeouts).
 async function openArrivals(page: Page) {
   // Frontdesk-modulen, sedan sidomenyns accordion "Operations" → "Ankomster".
-  await page.goto("https://admin.bookvisit.com/frontdesk/index", { waitUntil: "networkidle" });
-  await page.locator('button.section:has-text("Operations")').first().click();
+  await page.goto("https://admin.bookvisit.com/frontdesk/index", {
+    waitUntil: "domcontentloaded",
+    timeout: 60_000,
+  });
+  const operations = page.locator('button.section:has-text("Operations")').first();
+  await operations.waitFor({ timeout: 60_000 });
+  await operations.click();
   await page.locator('.nav-sidebar a:has-text("Ankomster")').first().click();
-  await page.waitForLoadState("networkidle");
   // Vänta in tabellen med kolumnen "Tilldelat rum".
-  await page.getByText("Tilldelat rum", { exact: false }).first().waitFor({ timeout: 30_000 });
+  await page.getByText("Tilldelat rum", { exact: false }).first().waitFor({ timeout: 60_000 });
   console.log(`✓ Ankomster-sidan laddad: ${page.url()}`);
 }
 
@@ -121,8 +124,8 @@ async function setDate(page: Page, target: string) {
     .locator(`.rdrDay:not(.rdrDayPassive):has(.rdrDayNumber span:text-is("${d}"))`)
     .first()
     .click();
-  await page.waitForLoadState("networkidle");
-  await page.waitForTimeout(1500);
+  // Låt tabellen ladda om (undvik networkidle – blir aldrig idle pga widgets).
+  await page.waitForTimeout(2500);
   console.log(`✓ Datum valt: ${target}`);
 }
 
@@ -186,12 +189,11 @@ async function uploadToApp(rows: ScrapedRow[]) {
   console.log(`✓ Klart: ${json.assigned}/${json.rows} rader tilldelade sjöbod.`);
 }
 
-(async () => {
-  console.log(`Hämtar ankomstlista för ${targetDate} från BookVisit Frontdesk…`);
+async function attempt(attemptNo: number): Promise<void> {
   const browser = await chromium.launch({ headless: !process.env.HEADFUL });
   const ctx = await browser.newContext({ locale: "sv-SE", timezoneId: "Europe/Stockholm" });
   const page = await ctx.newPage();
-  page.setDefaultTimeout(30_000);
+  page.setDefaultTimeout(45_000);
   try {
     await login(page);
     await openArrivals(page);
@@ -201,16 +203,33 @@ async function uploadToApp(rows: ScrapedRow[]) {
     const filtered = rows.filter((r) => !r.date || r.date === targetDate);
     if (filtered.length === 0) {
       // Inga ankomster idag är helt normalt – men logga för säkerhets skull.
-      await shot(page, "empty-table");
+      await shot(page, `empty-table-${attemptNo}`);
       console.log("Inga ankomstrader hittades (kan vara en dag utan incheckningar).");
       return;
     }
     await uploadToApp(filtered);
   } catch (err) {
-    await shot(page, "failure");
-    console.error("Fel:", err instanceof Error ? err.message : err);
-    process.exitCode = 1;
+    await shot(page, `failure-${attemptNo}`);
+    throw err;
   } finally {
     await browser.close();
+  }
+}
+
+(async () => {
+  console.log(`Hämtar ankomstlista för ${targetDate} från BookVisit Frontdesk…`);
+  const MAX_ATTEMPTS = 3;
+  for (let i = 1; i <= MAX_ATTEMPTS; i++) {
+    try {
+      await attempt(i);
+      return;
+    } catch (err) {
+      console.error(`Försök ${i}/${MAX_ATTEMPTS} misslyckades:`, err instanceof Error ? err.message : err);
+      if (i === MAX_ATTEMPTS) {
+        process.exitCode = 1;
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 20_000));
+    }
   }
 })();
