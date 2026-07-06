@@ -10,6 +10,7 @@ import { getBikeSends, sendBikeFor } from "./bikes.js";
 import { parseAndApplyArrivalList, applyAssignments, countAssignmentsForDate } from "./uploads.js";
 import { alignCabinNames } from "./cabin-align.js";
 import { sendDailySummary } from "./notify.js";
+import { triggerArrivalFetch } from "./github-trigger.js";
 import {
   getAllTemplates,
   getTemplate,
@@ -633,6 +634,22 @@ if (!config.enableInternalCron) {
   console.log(`[cron] Morgonjobb schemalagt: "${config.cronSchedule}" (${config.timezone}).`);
 } else {
   console.warn(`[cron] Ogiltigt CRON_SCHEDULE: "${config.cronSchedule}" – hoppar över schemaläggning.`);
+}
+
+// ─── Cron: trigga hämtning av ankomstlistan (GitHub Actions) ─────────────────
+// Körs från vår server eftersom GitHubs schemaläggare hoppar över/förskjuter
+// körningar. GitHubs eget schema ligger kvar som backup.
+if (config.github.token) {
+  for (const schedule of config.github.fetchSchedules.split(";").map((s) => s.trim()).filter(Boolean)) {
+    if (!cron.validate(schedule)) {
+      console.warn(`[gh-trigger] Ogiltigt schema: "${schedule}" – hoppar över.`);
+      continue;
+    }
+    cron.schedule(schedule, () => void triggerArrivalFetch(), { timezone: config.timezone });
+  }
+  console.log(`[gh-trigger] Ankomstlist-hämtning schemalagd: ${config.github.fetchSchedules} (${config.timezone}).`);
+} else {
+  console.log("[gh-trigger] GITHUB_TOKEN saknas – förlitar oss på GitHubs eget schema.");
 }
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {

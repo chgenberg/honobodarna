@@ -94,6 +94,16 @@ export const config = {
   enableInternalCron: bool("ENABLE_INTERNAL_CRON", true),
   // Hemlighet som krävs för att anropa /api/cron/run externt.
   cronSecret: str("CRON_SECRET"),
+
+  // GitHub-trigger: servern startar Actions-jobbet som hämtar ankomstlistan
+  // (GitHubs egen schemaläggare är opålitlig – vår server är punktlig).
+  github: {
+    token: str("GITHUB_TOKEN"),
+    repo: str("GITHUB_REPO", "chgenberg/honobodarna"),
+    workflow: str("GITHUB_FETCH_WORKFLOW", "fetch-arrival-list.yml"),
+    // Tider (Europe/Stockholm) då hämtningen triggas.
+    fetchSchedules: str("FETCH_SCHEDULES", "40 5 * * *;10 7 * * *;0 9 * * *"),
+  },
 };
 
 export type AppConfig = typeof config;
