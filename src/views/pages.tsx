@@ -512,6 +512,17 @@ interface LogRow {
   status: string;
   error: string | null;
   dry_run: number;
+  delivery_status?: string | null;
+  delivered_at?: string | null;
+}
+
+// Leveransstatus från operatören (endast SMS): skickat ≠ levererat.
+function deliveryPill(l: LogRow) {
+  if (l.channel !== "sms" || l.status === "dry-run") return <span class="muted">–</span>;
+  if (l.delivery_status === "delivered") return <span class="pill sent">Levererat</span>;
+  if (l.delivery_status === "failed") return <span class="pill failed">Ej levererat</span>;
+  if (l.status === "sent") return <span class="pill">Väntar kvitto</span>;
+  return <span class="muted">–</span>;
 }
 
 export const LogPage: FC<{ logs: LogRow[]; dryRun: boolean }> = ({ logs, dryRun }) => (
@@ -531,6 +542,7 @@ export const LogPage: FC<{ logs: LogRow[]; dryRun: boolean }> = ({ logs, dryRun 
               <th>Kanal</th>
               <th>Mottagare</th>
               <th>Status</th>
+              <th>Levererat</th>
               <th>Fel</th>
             </tr>
           </thead>
@@ -546,6 +558,7 @@ export const LogPage: FC<{ logs: LogRow[]; dryRun: boolean }> = ({ logs, dryRun 
                     {l.status}
                   </span>
                 </td>
+                <td data-label="Levererat">{deliveryPill(l)}</td>
                 <td class="muted" data-label="Fel">{l.error ?? ""}</td>
               </tr>
             ))}

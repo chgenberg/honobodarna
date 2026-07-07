@@ -83,6 +83,9 @@ export const config = {
   // Driftmejl: varningar (otilldelade sjöbodar) och dagliga utskicksbekräftelser.
   alertEmail: str("ALERT_EMAIL", "info@honosjobodar.se"),
 
+  // Publik bas-URL (används för 46elks leveranskvitto-webhook).
+  publicUrl: str("PUBLIC_URL", "https://honobodarna-production.up.railway.app"),
+
   dryRun: bool("DRY_RUN", true),
   canaryPhone: str("CANARY_PHONE"),
   canaryEmail: str("CANARY_EMAIL"),

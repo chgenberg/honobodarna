@@ -3,7 +3,74 @@
 //  - dagligt bekräftelsemejl efter att koderna skickats ut
 import { db } from "./db.js";
 import { config } from "./config.js";
-import { sendOpsEmail } from "./email.js";
+import { sendOpsEmail, sendEmail } from "./email.js";
+import { langForPhone } from "./templates.js";
+
+// Tar emot leveranskvitto från 46elks. Om ett SMS inte kom fram (t.ex. USA-nummer
+// som blockerar textavsändare) skickas dörrkoden automatiskt via e-post istället,
+// och receptionen får ett driftmejl.
+export async function recordSmsDelivery(providerId: string, status: string, deliveredAt?: string): Promise<void> {
+  const log = db
+    .prepare("SELECT id, arrival_id, arrival_date, recipient, body, delivery_status FROM message_log WHERE provider_id = ?")
+    .get(providerId) as
+    | { id: number; arrival_id: number | null; arrival_date: string | null; recipient: string; body: string; delivery_status: string | null }
+    | undefined;
+  if (!log) return;
+
+  const alreadyFailed = log.delivery_status === "failed";
+  db.prepare("UPDATE message_log SET delivery_status = ?, delivered_at = ? WHERE id = ?").run(
+    status,
+    deliveredAt ?? null,
+    log.id,
+  );
+  if (status !== "failed" || alreadyFailed) return; // fallback endast en gång
+
+  const arrival = log.arrival_id
+    ? (db.prepare("SELECT id, guest_name, phone, email FROM arrivals WHERE id = ?").get(log.arrival_id) as
+        | { id: number; guest_name: string | null; phone: string | null; email: string | null }
+        | undefined)
+    : undefined;
+  const guest = arrival?.guest_name ?? log.recipient;
+
+  if (arrival?.email) {
+    const lang = langForPhone(arrival.phone);
+    const subject =
+      lang === "sv" ? "Välkommen till Hönö Sjöbodar – din dörrkod" : "Welcome to Hönö Sjöbodar – your door code";
+    const r = await sendEmail(arrival.email, subject, log.body);
+    db.prepare(
+      `INSERT INTO message_log (arrival_id, arrival_date, channel, recipient, body, status, provider_id, error, dry_run)
+       VALUES (?, ?, 'email', ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      arrival.id,
+      log.arrival_date,
+      r.recipient,
+      log.body,
+      r.status,
+      r.providerId ?? null,
+      r.error ?? null,
+      config.dryRun ? 1 : 0,
+    );
+    db.prepare("UPDATE arrivals SET channel = 'email', note = ?, updated_at = datetime('now') WHERE id = ?").run(
+      "SMS levererades inte – koden skickad via e-post",
+      arrival.id,
+    );
+    await sendOpsEmail(
+      config.alertEmail,
+      `ℹ️ SMS till ${guest} kom inte fram – koden skickad via e-post`,
+      `SMS:et till ${guest} (${log.recipient}) kunde inte levereras enligt operatören.\n\nKoden har automatiskt skickats via e-post till ${arrival.email} istället (${r.ok ? "levererat till e-postservern" : "OBS: e-postskicket misslyckades också!"}).\n\nVanlig orsak: utländska operatörer (särskilt USA/+1) tillåter inte SMS med textavsändare.\n\n/ Hönö Sjöbodar-systemet`,
+    );
+  } else {
+    db.prepare("UPDATE arrivals SET note = ?, updated_at = datetime('now') WHERE id = ?").run(
+      "SMS levererades inte – ingen e-post finns, kontakta gästen",
+      arrival?.id ?? -1,
+    );
+    await sendOpsEmail(
+      config.alertEmail,
+      `⚠️ SMS till ${guest} kom inte fram – åtgärd krävs`,
+      `SMS:et till ${guest} (${log.recipient}) kunde inte levereras enligt operatören, och gästen saknar e-postadress.\n\nKontakta gästen på annat sätt och ge dörrkoden manuellt.\n\n/ Hönö Sjöbodar-systemet`,
+    );
+  }
+}
 
 interface SummaryRow {
   guest_name: string | null;

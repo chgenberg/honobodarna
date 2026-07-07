@@ -9,7 +9,7 @@ import { db, getSetting, setSetting } from "./db.js";
 import { getBikeSends, sendBikeFor } from "./bikes.js";
 import { parseAndApplyArrivalList, applyAssignments, countAssignmentsForDate } from "./uploads.js";
 import { alignCabinNames } from "./cabin-align.js";
-import { sendDailySummary } from "./notify.js";
+import { sendDailySummary, recordSmsDelivery } from "./notify.js";
 import { triggerArrivalFetch } from "./github-trigger.js";
 import {
   getAllTemplates,
@@ -131,6 +131,22 @@ app.post("/api/upload-arrivals", async (c) => {
   }
   console.log(`[upload-api] ${summary.rows} rader, ${summary.assigned} tilldelade sjöbodar.`);
   return c.json({ ok: true, ...summary });
+});
+
+// Leveranskvitto (DLR) från 46elks: form-POST med id, status, delivered.
+// Uppdaterar loggen och faller tillbaka på e-post om SMS:et inte kom fram.
+app.post("/api/sms-dlr", async (c) => {
+  if (!cronAuthorized(c)) return c.json({ ok: false }, 401);
+  const body = await c.req.parseBody();
+  const id = String(body.id ?? "");
+  const status = String(body.status ?? "");
+  if (!id || !status) return c.json({ ok: false, error: "id/status saknas" }, 400);
+  try {
+    await recordSmsDelivery(id, status, body.delivered ? String(body.delivered) : undefined);
+  } catch (err) {
+    console.error("[sms-dlr] Fel:", err);
+  }
+  return c.json({ ok: true });
 });
 
 // ─── Hjälpare ────────────────────────────────────────────────────────────────

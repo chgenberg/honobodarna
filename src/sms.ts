@@ -42,6 +42,11 @@ export async function sendSms(toRaw: string, body: string): Promise<SendResult> 
         from: config.elks.sender,
         to,
         message: body,
+        // Leveranskvitto: 46elks POST:ar id+status hit när operatören kvitterat
+        // (eller misslyckats) – då kan vi följa upp och falla tillbaka på e-post.
+        ...(config.publicUrl && config.cronSecret
+          ? { whendelivered: `${config.publicUrl}/api/sms-dlr?token=${encodeURIComponent(config.cronSecret)}` }
+          : {}),
       }).toString(),
     });
     const text = await res.text();

@@ -179,6 +179,9 @@ ensureColumn("bv_bookings", "bike_label", "TEXT");
 ensureColumn("bv_bookings", "has_package", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("bv_bookings", "package_label", "TEXT");
 ensureColumn("arrivals", "is_package", "INTEGER NOT NULL DEFAULT 0");
+// Leveransstatus från 46elks DLR-webhook (skickat ≠ levererat).
+ensureColumn("message_log", "delivery_status", "TEXT");
+ensureColumn("message_log", "delivered_at", "TEXT");
 // Index som beror på kolumner ovan (skapas efter migrationen).
 db.exec("CREATE INDEX IF NOT EXISTS idx_bv_bike ON bv_bookings(has_bike)");
 
