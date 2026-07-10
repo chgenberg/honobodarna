@@ -32,6 +32,28 @@ export async function recordSmsDelivery(providerId: string, status: string, deli
     : undefined;
   const guest = arrival?.guest_name ?? log.recipient;
 
+  // Har gästen redan fått ett lyckat mejl (utskicket går numera via båda kanalerna)?
+  const emailAlreadySent = arrival
+    ? ((db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM message_log WHERE arrival_id = ? AND channel = 'email' AND status IN ('sent','canary')",
+        )
+        .get(arrival.id) as { n: number }).n > 0)
+    : false;
+
+  if (arrival?.email && emailAlreadySent) {
+    db.prepare("UPDATE arrivals SET note = ?, updated_at = datetime('now') WHERE id = ?").run(
+      "SMS levererades inte – men gästen fick koden via e-post",
+      arrival.id,
+    );
+    await sendOpsEmail(
+      config.alertEmail,
+      `ℹ️ SMS till ${guest} kom inte fram – gästen har koden via e-post`,
+      `SMS:et till ${guest} (${log.recipient}) kunde inte levereras enligt operatören.\n\nIngen åtgärd krävs: gästen fick redan dörrkoden via e-post (${arrival.email}) i samma utskick.\n\nVanlig orsak: utländska operatörer (särskilt USA/+1) tillåter inte SMS med textavsändare.\n\n/ Hönö Sjöbodar-systemet`,
+    );
+    return;
+  }
+
   if (arrival?.email) {
     const lang = langForPhone(arrival.phone);
     const subject =
@@ -135,8 +157,10 @@ Detta mejl skickas automatiskt när den automatiska hämtningen från BookVisit 
 }
 
 function contact(r: SummaryRow): string {
-  if (r.channel === "sms" && r.phone) return `SMS till ${r.phone}`;
-  if (r.channel === "email" && r.email) return `e-post till ${r.email}`;
+  const parts: string[] = [];
+  if (r.channel?.includes("sms") && r.phone) parts.push(`SMS till ${r.phone}`);
+  if (r.channel?.includes("email") && r.email) parts.push(`e-post till ${r.email}`);
+  if (parts.length) return parts.join(" + ");
   return r.phone ? `SMS till ${r.phone}` : r.email ? `e-post till ${r.email}` : "kontakt saknas";
 }
 

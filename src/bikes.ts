@@ -63,7 +63,7 @@ const logMessage = db.prepare(`
 export interface BikeOutcome {
   id: number;
   guest: string;
-  channel: "sms" | "email" | "none";
+  channel: string; // "sms", "email", "sms+email" eller "none"
   status: string;
   error?: string;
 }
@@ -83,15 +83,12 @@ export async function sendBikeFor(id: number, opts: { force?: boolean } = {}): P
   };
   const body = render(tmpl.text, vars);
 
-  let channel: "sms" | "email" | "none" = "none";
-  let result;
-  if (b.phone) {
-    channel = "sms";
-    result = await sendSms(b.phone, body);
-  } else if (b.email) {
-    channel = "email";
-    result = await sendEmail(b.email, render(tmpl.subject, vars), body);
-  } else {
+  // Skicka via BÅDA kanalerna när gästen har både telefon och e-post.
+  const attempts: Array<{ channel: "sms" | "email"; r: Awaited<ReturnType<typeof sendSms>> }> = [];
+  if (b.phone) attempts.push({ channel: "sms", r: await sendSms(b.phone, body) });
+  if (b.email) attempts.push({ channel: "email", r: await sendEmail(b.email, render(tmpl.subject, vars), body) });
+
+  if (attempts.length === 0) {
     db.prepare("UPDATE bike_sends SET status='skipped', note=?, updated_at=datetime('now') WHERE id=?").run(
       "Varken telefon eller e-post finns",
       id,
@@ -99,25 +96,32 @@ export async function sendBikeFor(id: number, opts: { force?: boolean } = {}): P
     return { id, guest: b.guest_name ?? "?", channel: "none", status: "skipped" };
   }
 
-  logMessage.run(
-    b.notify_date,
-    channel,
-    result.recipient,
-    body,
-    result.status,
-    result.providerId ?? null,
-    result.error ?? null,
-    config.dryRun ? 1 : 0,
-  );
+  for (const att of attempts) {
+    logMessage.run(
+      b.notify_date,
+      att.channel,
+      att.r.recipient,
+      body,
+      att.r.status,
+      att.r.providerId ?? null,
+      att.r.error ?? null,
+      config.dryRun ? 1 : 0,
+    );
+  }
+
+  const okAttempts = attempts.filter((x) => x.r.ok);
+  const anyOk = okAttempts.length > 0;
+  const channel = (okAttempts.length ? okAttempts : attempts).map((x) => x.channel).join("+");
+  const errors = attempts.filter((x) => x.r.error).map((x) => `${x.channel}: ${x.r.error}`).join(" · ") || null;
 
   db.prepare("UPDATE bike_sends SET status=?, channel=?, note=?, updated_at=datetime('now') WHERE id=?").run(
-    result.ok ? "sent" : "failed",
+    anyOk ? "sent" : "failed",
     channel,
-    result.error ?? null,
+    errors,
     id,
   );
 
-  return { id, guest: b.guest_name ?? "?", channel, status: result.status, error: result.error };
+  return { id, guest: b.guest_name ?? "?", channel, status: anyOk ? okAttempts[0].r.status : "failed", error: errors ?? undefined };
 }
 
 export interface BikeJobResult {

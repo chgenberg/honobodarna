@@ -94,7 +94,7 @@ const logMessage = db.prepare(`
 export interface SendOutcome {
   arrivalId: number;
   guest: string;
-  channel: "sms" | "email" | "none";
+  channel: string; // "sms", "email", "sms+email" eller "none"
   status: string;
   error?: string;
 }
@@ -143,15 +143,12 @@ export async function sendForArrival(id: number, opts: { force?: boolean } = {})
   };
   const body = render(tmpl.text, vars);
 
-  let channel: "sms" | "email" | "none" = "none";
-  let result;
-  if (a.phone) {
-    channel = "sms";
-    result = await sendSms(a.phone, body);
-  } else if (a.email) {
-    channel = "email";
-    result = await sendEmail(a.email, render(tmpl.subject, vars), body);
-  } else {
+  // Skicka via BÅDA kanalerna när gästen har både telefon och e-post.
+  const attempts: Array<{ channel: "sms" | "email"; r: Awaited<ReturnType<typeof sendSms>> }> = [];
+  if (a.phone) attempts.push({ channel: "sms", r: await sendSms(a.phone, body) });
+  if (a.email) attempts.push({ channel: "email", r: await sendEmail(a.email, render(tmpl.subject, vars), body) });
+
+  if (attempts.length === 0) {
     db.prepare("UPDATE arrivals SET status='skipped', note=?, updated_at=datetime('now') WHERE id=?").run(
       "Varken telefon eller e-post finns",
       id,
@@ -159,29 +156,36 @@ export async function sendForArrival(id: number, opts: { force?: boolean } = {})
     return { arrivalId: id, guest: a.guest_name ?? "?", channel: "none", status: "skipped" };
   }
 
-  logMessage.run({
-    arrival_id: id,
-    arrival_date: a.arrival_date,
-    channel,
-    recipient: result.recipient,
-    body,
-    status: result.status,
-    provider_id: result.providerId ?? null,
-    error: result.error ?? null,
-    dry_run: config.dryRun ? 1 : 0,
-  });
+  for (const att of attempts) {
+    logMessage.run({
+      arrival_id: id,
+      arrival_date: a.arrival_date,
+      channel: att.channel,
+      recipient: att.r.recipient,
+      body,
+      status: att.r.status,
+      provider_id: att.r.providerId ?? null,
+      error: att.r.error ?? null,
+      dry_run: config.dryRun ? 1 : 0,
+    });
+  }
 
-  const newStatus = result.ok ? "sent" : "failed";
+  const okAttempts = attempts.filter((x) => x.r.ok);
+  const anyOk = okAttempts.length > 0;
+  // "sent" om minst en kanal gick iväg; kanalfältet visar de som lyckades.
+  const channel = (okAttempts.length ? okAttempts : attempts).map((x) => x.channel).join("+");
+  const errors = attempts.filter((x) => x.r.error).map((x) => `${x.channel}: ${x.r.error}`).join(" · ") || null;
+
   db.prepare(
     "UPDATE arrivals SET status=?, channel=?, note=?, updated_at=datetime('now') WHERE id=?",
-  ).run(newStatus, channel, result.error ?? null, id);
+  ).run(anyOk ? "sent" : "failed", channel, errors, id);
 
   return {
     arrivalId: id,
     guest: a.guest_name ?? "?",
     channel,
-    status: result.status,
-    error: result.error,
+    status: anyOk ? okAttempts[0].r.status : "failed",
+    error: errors ?? undefined,
   };
 }
 

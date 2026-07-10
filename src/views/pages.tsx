@@ -104,13 +104,9 @@ const ArrivalTable: FC<{ arrivals: ArrivalView[]; cabins: Cabin[]; date: string;
               </div>
             </td>
             <td data-label="Kontakt">
-              {a.phone ? (
-                <div><span class="pill sms">SMS</span> {a.phone}</div>
-              ) : a.email ? (
-                <div><span class="pill email">E-post</span> {a.email}</div>
-              ) : (
-                <span class="pill failed">Saknar kontakt</span>
-              )}
+              {a.phone ? <div><span class="pill sms">SMS</span> {a.phone}</div> : null}
+              {a.email ? <div style={a.phone ? "margin-top:4px;" : ""}><span class="pill email">E-post</span> {a.email}</div> : null}
+              {!a.phone && !a.email ? <span class="pill failed">Saknar kontakt</span> : null}
             </td>
             <td class="muted" data-label="Rumstyp">{a.room_type_label ?? "–"}</td>
             <td data-label="Sjöbod">
@@ -280,13 +276,9 @@ export const TodayPage: FC<TodayProps> = (p) => {
                   <tr>
                     <td data-label="Gäst"><strong>{b.guest_name}</strong></td>
                     <td data-label="Kontakt">
-                      {b.phone ? (
-                        <div><span class="pill sms">SMS</span> {b.phone}</div>
-                      ) : b.email ? (
-                        <div><span class="pill email">E-post</span> {b.email}</div>
-                      ) : (
-                        <span class="pill failed">Saknar kontakt</span>
-                      )}
+                      {b.phone ? <div><span class="pill sms">SMS</span> {b.phone}</div> : null}
+                      {b.email ? <div style={b.phone ? "margin-top:4px;" : ""}><span class="pill email">E-post</span> {b.email}</div> : null}
+                      {!b.phone && !b.email ? <span class="pill failed">Saknar kontakt</span> : null}
                     </td>
                     <td data-label="Cykel" class="muted">{b.bike_label ?? "Cykel"}</td>
                     <td data-label="Status">{statusPill(b.status)}</td>
