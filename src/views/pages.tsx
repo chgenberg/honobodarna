@@ -71,6 +71,7 @@ export interface ArrivalView {
   channel: string | null;
   needs_review: number;
   note: string | null;
+  has_seafood?: number;
 }
 
 const ArrivalTable: FC<{ arrivals: ArrivalView[]; cabins: Cabin[]; date: string; emptyText: string }> = ({
@@ -101,6 +102,7 @@ const ArrivalTable: FC<{ arrivals: ArrivalView[]; cabins: Cabin[]; date: string;
               <div class="guest-cell">
                 <strong>{a.guest_name}</strong>
                 {a.needs_review ? <span class="pill review tiny">Granska matchning</span> : null}
+                {a.has_seafood ? <span class="pill sent tiny">Skaldjurspaket</span> : null}
               </div>
             </td>
             <td data-label="Kontakt">

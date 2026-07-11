@@ -177,6 +177,7 @@ function enrichArrivals(rows: ArrivalRow[]): ArrivalView[] {
       channel: a.channel,
       needs_review: a.needs_review,
       note: a.note,
+      has_seafood: a.has_seafood,
     };
   });
 }

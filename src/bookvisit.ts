@@ -100,15 +100,29 @@ function bikeInfo(bd?: RawBooking["bookingData"]): { hasBike: boolean; label: st
   return { hasBike: Boolean(match), label: match ?? null };
 }
 
-// Identifierar paket (sjöbod + middag) via middags-/menytillägg eller paketbeskrivning.
-const PACKAGE_RE = /tullhuset|middag|\bmeny\b|3-rätt|skaldjur|dinner/i;
-function packageInfo(bd?: RawBooking["bookingData"]): { hasPackage: boolean; label: string | null } {
+// Identifierar middagspaketet (sjöbod + middag på Tullhuset). OBS: skaldjurspaketet
+// är något annat (skaldjur levererade till sjöboden) och får INTE hamna här –
+// de gästerna får vanligt incheckningsmeddelande + en skaldjursrad på slutet.
+const PACKAGE_RE = /tullhuset|middag|\bmeny\b|3-rätt|dinner|vinga/i;
+const SEAFOOD_RE = /skaldjur|seafood/i;
+function packageInfo(bd?: RawBooking["bookingData"]): {
+  hasPackage: boolean;
+  label: string | null;
+  hasSeafood: boolean;
+  seafoodLabel: string | null;
+} {
   const names = [
     ...(bd?.addOnDescriptions ?? []).map((a) => a?.name),
     ...(bd?.packageDescriptions ?? []).map((p) => p?.name),
   ].filter(Boolean) as string[];
-  const match = names.find((n) => PACKAGE_RE.test(n));
-  return { hasPackage: Boolean(match), label: match ?? null };
+  const seafood = names.find((n) => SEAFOOD_RE.test(n));
+  const dinner = names.find((n) => PACKAGE_RE.test(n) && !SEAFOOD_RE.test(n));
+  return {
+    hasPackage: Boolean(dinner),
+    label: dinner ?? null,
+    hasSeafood: Boolean(seafood),
+    seafoodLabel: seafood ?? null,
+  };
 }
 
 export async function getBooking(code: string): Promise<RawBooking | null> {
@@ -178,11 +192,11 @@ const upsertBooking = db.prepare(`
   INSERT INTO bv_bookings
     (booking_code, booking_guid, arrival_date, departure_date, status,
      guest_name, phone, phone_country, email, room_id, room_type_label,
-     has_bike, bike_label, has_package, package_label, updated_at)
+     has_bike, bike_label, has_package, package_label, has_seafood, seafood_label, updated_at)
   VALUES
     (@booking_code, @booking_guid, @arrival_date, @departure_date, @status,
      @guest_name, @phone, @phone_country, @email, @room_id, @room_type_label,
-     @has_bike, @bike_label, @has_package, @package_label, datetime('now'))
+     @has_bike, @bike_label, @has_package, @package_label, @has_seafood, @seafood_label, datetime('now'))
   ON CONFLICT(booking_code) DO UPDATE SET
     booking_guid=excluded.booking_guid, arrival_date=excluded.arrival_date,
     departure_date=excluded.departure_date, status=excluded.status,
@@ -191,6 +205,7 @@ const upsertBooking = db.prepare(`
     room_id=excluded.room_id, room_type_label=excluded.room_type_label,
     has_bike=excluded.has_bike, bike_label=excluded.bike_label,
     has_package=excluded.has_package, package_label=excluded.package_label,
+    has_seafood=excluded.has_seafood, seafood_label=excluded.seafood_label,
     updated_at=datetime('now')
 `);
 
@@ -223,6 +238,8 @@ function storeBooking(code: string, b: RawBooking): void {
     bike_label: bike.label,
     has_package: pkg.hasPackage ? 1 : 0,
     package_label: pkg.label,
+    has_seafood: pkg.hasSeafood ? 1 : 0,
+    seafood_label: pkg.seafoodLabel,
   });
 }
 
@@ -356,6 +373,7 @@ export interface CachedArrival {
   room_type_label: string | null;
   status: string | null;
   has_package: number;
+  has_seafood: number;
 }
 
 // Läser dagens (eller valt datums) aktiva ankomster ur den lokala speglingen.
@@ -365,7 +383,7 @@ export function getArrivalsForDate(date: string): CachedArrival[] {
   return db
     .prepare(
       `SELECT booking_code, booking_guid, arrival_date, guest_name, phone, email,
-              room_id, room_type_label, status, has_package
+              room_id, room_type_label, status, has_package, has_seafood
        FROM bv_bookings
        WHERE arrival_date = ? AND status IS NOT 'Cancelled' AND room_id IS NOT NULL
        ORDER BY guest_name`,

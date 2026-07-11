@@ -24,19 +24,20 @@ export interface ArrivalRow {
   needs_review: number;
   note: string | null;
   is_package: number;
+  has_seafood: number;
 }
 
 const upsertArrival = db.prepare(`
   INSERT INTO arrivals
     (arrival_date, booking_code, booking_guid, guest_name, phone, email,
-     room_id, room_type_label, is_package, status)
+     room_id, room_type_label, is_package, has_seafood, status)
   VALUES
     (@arrival_date, @booking_code, @booking_guid, @guest_name, @phone, @email,
-     @room_id, @room_type_label, @is_package, 'pending')
+     @room_id, @room_type_label, @is_package, @has_seafood, 'pending')
   ON CONFLICT(booking_code, arrival_date) DO UPDATE SET
     guest_name=excluded.guest_name, phone=excluded.phone, email=excluded.email,
     room_id=excluded.room_id, room_type_label=excluded.room_type_label,
-    is_package=excluded.is_package, updated_at=datetime('now')
+    is_package=excluded.is_package, has_seafood=excluded.has_seafood, updated_at=datetime('now')
 `);
 
 // Importerar dagens ankomster från speglingen till arrivals-tabellen och matchar stugor.
@@ -56,6 +57,7 @@ export function prepareArrivals(date: string): ArrivalRow[] {
         room_id: c.room_id,
         room_type_label: c.room_type_label,
         is_package: c.has_package ? 1 : 0,
+        has_seafood: c.has_seafood ? 1 : 0,
       });
     }
   });
@@ -141,7 +143,16 @@ export async function sendForArrival(id: number, opts: { force?: boolean } = {})
     stuga: cabin.name,
     kod: cabin.door_code,
   };
-  const body = render(tmpl.text, vars);
+  let body = render(tmpl.text, vars);
+
+  // Skaldjurspaket (levereras till sjöboden): vanligt incheckningsmeddelande
+  // med en extra rad på slutet – EJ middagspaketets text.
+  if (a.has_seafood) {
+    body +=
+      lang === "sv"
+        ? "\n\nErt skaldjurspaket finns på plats i sjöboden vid incheckning."
+        : "\n\nYour seafood package will be in place in the cabin at check-in.";
+  }
 
   // Skicka via BÅDA kanalerna när gästen har både telefon och e-post.
   const attempts: Array<{ channel: "sms" | "email"; r: Awaited<ReturnType<typeof sendSms>> }> = [];
