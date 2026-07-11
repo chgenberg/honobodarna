@@ -144,7 +144,9 @@ app.post("/api/sms-dlr", async (c) => {
   try {
     await recordSmsDelivery(id, status, body.delivered ? String(body.delivered) : undefined);
   } catch (err) {
+    // Svara 5xx så att 46elks skickar om kvittot – annars tappas e-postfallbacken.
     console.error("[sms-dlr] Fel:", err);
+    return c.json({ ok: false }, 500);
   }
   return c.json({ ok: true });
 });

@@ -84,9 +84,23 @@ export async function sendBikeFor(id: number, opts: { force?: boolean } = {}): P
   const body = render(tmpl.text, vars);
 
   // Skicka via BÅDA kanalerna när gästen har både telefon och e-post.
+  // Logga varje kanal direkt (leveranskvittot slår upp provider_id i loggen).
   const attempts: Array<{ channel: "sms" | "email"; r: Awaited<ReturnType<typeof sendSms>> }> = [];
-  if (b.phone) attempts.push({ channel: "sms", r: await sendSms(b.phone, body) });
-  if (b.email) attempts.push({ channel: "email", r: await sendEmail(b.email, render(tmpl.subject, vars), body) });
+  const logAttempt = (channel: "sms" | "email", r: Awaited<ReturnType<typeof sendSms>>) => {
+    logMessage.run(
+      b.notify_date,
+      channel,
+      r.recipient,
+      body,
+      r.status,
+      r.providerId ?? null,
+      r.error ?? null,
+      config.dryRun ? 1 : 0,
+    );
+    attempts.push({ channel, r });
+  };
+  if (b.phone) logAttempt("sms", await sendSms(b.phone, body));
+  if (b.email) logAttempt("email", await sendEmail(b.email, render(tmpl.subject, vars), body));
 
   if (attempts.length === 0) {
     db.prepare("UPDATE bike_sends SET status='skipped', note=?, updated_at=datetime('now') WHERE id=?").run(
@@ -94,19 +108,6 @@ export async function sendBikeFor(id: number, opts: { force?: boolean } = {}): P
       id,
     );
     return { id, guest: b.guest_name ?? "?", channel: "none", status: "skipped" };
-  }
-
-  for (const att of attempts) {
-    logMessage.run(
-      b.notify_date,
-      att.channel,
-      att.r.recipient,
-      body,
-      att.r.status,
-      att.r.providerId ?? null,
-      att.r.error ?? null,
-      config.dryRun ? 1 : 0,
-    );
   }
 
   const okAttempts = attempts.filter((x) => x.r.ok);

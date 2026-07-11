@@ -155,9 +155,25 @@ export async function sendForArrival(id: number, opts: { force?: boolean } = {})
   }
 
   // Skicka via BÅDA kanalerna när gästen har både telefon och e-post.
+  // VIKTIGT: logga varje kanal DIREKT efter att den skickats – 46elks
+  // leveranskvitto kan annars hinna före loggraden (slår upp provider_id).
   const attempts: Array<{ channel: "sms" | "email"; r: Awaited<ReturnType<typeof sendSms>> }> = [];
-  if (a.phone) attempts.push({ channel: "sms", r: await sendSms(a.phone, body) });
-  if (a.email) attempts.push({ channel: "email", r: await sendEmail(a.email, render(tmpl.subject, vars), body) });
+  const logAttempt = (channel: "sms" | "email", r: Awaited<ReturnType<typeof sendSms>>) => {
+    logMessage.run({
+      arrival_id: id,
+      arrival_date: a.arrival_date,
+      channel,
+      recipient: r.recipient,
+      body,
+      status: r.status,
+      provider_id: r.providerId ?? null,
+      error: r.error ?? null,
+      dry_run: config.dryRun ? 1 : 0,
+    });
+    attempts.push({ channel, r });
+  };
+  if (a.phone) logAttempt("sms", await sendSms(a.phone, body));
+  if (a.email) logAttempt("email", await sendEmail(a.email, render(tmpl.subject, vars), body));
 
   if (attempts.length === 0) {
     db.prepare("UPDATE arrivals SET status='skipped', note=?, updated_at=datetime('now') WHERE id=?").run(
@@ -165,20 +181,6 @@ export async function sendForArrival(id: number, opts: { force?: boolean } = {})
       id,
     );
     return { arrivalId: id, guest: a.guest_name ?? "?", channel: "none", status: "skipped" };
-  }
-
-  for (const att of attempts) {
-    logMessage.run({
-      arrival_id: id,
-      arrival_date: a.arrival_date,
-      channel: att.channel,
-      recipient: att.r.recipient,
-      body,
-      status: att.r.status,
-      provider_id: att.r.providerId ?? null,
-      error: att.r.error ?? null,
-      dry_run: config.dryRun ? 1 : 0,
-    });
   }
 
   const okAttempts = attempts.filter((x) => x.r.ok);

@@ -17,13 +17,21 @@ export async function recordSmsDelivery(providerId: string, status: string, deli
     | undefined;
   if (!log) return;
 
-  const alreadyFailed = log.delivery_status === "failed";
-  db.prepare("UPDATE message_log SET delivery_status = ?, delivered_at = ? WHERE id = ?").run(
-    status,
-    deliveredAt ?? null,
-    log.id,
-  );
-  if (status !== "failed" || alreadyFailed) return; // fallback endast en gång
+  if (status !== "failed") {
+    db.prepare("UPDATE message_log SET delivery_status = ?, delivered_at = ? WHERE id = ?").run(
+      status,
+      deliveredAt ?? null,
+      log.id,
+    );
+    return;
+  }
+
+  // Misslyckad leverans: dedupe (46elks kan skicka om kvittot). Statusen sätts
+  // först EFTER att fallbacken lyckats – kastar den behålls null så att en
+  // omsändning av kvittot (vi svarar 5xx) kör om hela hanteringen.
+  if (log.delivery_status === "failed") return;
+  const markFailed = () =>
+    db.prepare("UPDATE message_log SET delivery_status = 'failed', delivered_at = NULL WHERE id = ?").run(log.id);
 
   const arrival = log.arrival_id
     ? (db.prepare("SELECT id, guest_name, phone, email FROM arrivals WHERE id = ?").get(log.arrival_id) as
@@ -32,16 +40,27 @@ export async function recordSmsDelivery(providerId: string, status: string, deli
     : undefined;
   const guest = arrival?.guest_name ?? log.recipient;
 
-  // Har gästen redan fått ett lyckat mejl (utskicket går numera via båda kanalerna)?
-  const emailAlreadySent = arrival
-    ? ((db
-        .prepare(
-          "SELECT COUNT(*) AS n FROM message_log WHERE arrival_id = ? AND channel = 'email' AND status IN ('sent','canary')",
-        )
-        .get(arrival.id) as { n: number }).n > 0)
-    : false;
+  // Ej dörrkodsutskick (cykel-notis, kundutskick m.m.): ingen kodfallback –
+  // bara ett informativt driftmejl så receptionen vet att SMS:et inte kom fram.
+  if (!arrival) {
+    await sendOpsEmail(
+      config.alertEmail,
+      `ℹ️ SMS till ${log.recipient} kom inte fram`,
+      `Ett SMS till ${log.recipient} kunde inte levereras enligt operatören.\n\nDet gällde inte ett dörrkodsutskick (t.ex. cykel-notis eller kundutskick). Meddelandets början:\n\n"${log.body.slice(0, 160)}…"\n\nKontakta mottagaren på annat sätt om meddelandet var viktigt.\n\n/ Hönö Sjöbodar-systemet`,
+    );
+    markFailed();
+    return;
+  }
 
-  if (arrival?.email && emailAlreadySent) {
+  // Har gästen redan fått ett lyckat mejl (utskicket går numera via båda kanalerna)?
+  const emailAlreadySent =
+    (db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM message_log WHERE arrival_id = ? AND channel = 'email' AND status IN ('sent','canary')",
+      )
+      .get(arrival.id) as { n: number }).n > 0;
+
+  if (arrival.email && emailAlreadySent) {
     db.prepare("UPDATE arrivals SET note = ?, updated_at = datetime('now') WHERE id = ?").run(
       "SMS levererades inte – men gästen fick koden via e-post",
       arrival.id,
@@ -51,10 +70,11 @@ export async function recordSmsDelivery(providerId: string, status: string, deli
       `ℹ️ SMS till ${guest} kom inte fram – gästen har koden via e-post`,
       `SMS:et till ${guest} (${log.recipient}) kunde inte levereras enligt operatören.\n\nIngen åtgärd krävs: gästen fick redan dörrkoden via e-post (${arrival.email}) i samma utskick.\n\nVanlig orsak: utländska operatörer (särskilt USA/+1) tillåter inte SMS med textavsändare.\n\n/ Hönö Sjöbodar-systemet`,
     );
+    markFailed();
     return;
   }
 
-  if (arrival?.email) {
+  if (arrival.email) {
     const lang = langForPhone(arrival.phone);
     const subject =
       lang === "sv" ? "Välkommen till Hönö Sjöbodar – din dörrkod" : "Welcome to Hönö Sjöbodar – your door code";
@@ -84,7 +104,7 @@ export async function recordSmsDelivery(providerId: string, status: string, deli
   } else {
     db.prepare("UPDATE arrivals SET note = ?, updated_at = datetime('now') WHERE id = ?").run(
       "SMS levererades inte – ingen e-post finns, kontakta gästen",
-      arrival?.id ?? -1,
+      arrival.id,
     );
     await sendOpsEmail(
       config.alertEmail,
@@ -92,6 +112,7 @@ export async function recordSmsDelivery(providerId: string, status: string, deli
       `SMS:et till ${guest} (${log.recipient}) kunde inte levereras enligt operatören, och gästen saknar e-postadress.\n\nKontakta gästen på annat sätt och ge dörrkoden manuellt.\n\n/ Hönö Sjöbodar-systemet`,
     );
   }
+  markFailed();
 }
 
 interface SummaryRow {
