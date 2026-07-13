@@ -186,6 +186,11 @@ ensureColumn("message_log", "delivered_at", "TEXT");
 ensureColumn("bv_bookings", "has_seafood", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("bv_bookings", "seafood_label", "TEXT");
 ensureColumn("arrivals", "has_seafood", "INTEGER NOT NULL DEFAULT 0");
+
+// En cykelavisering per BookVisit-bokning, oavsett hyreslängd/datum.
+// Tabellen har historiskt UNIQUE(booking_code, notify_date); detta striktare
+// index skyddar även om samma bokning av misstag förbereds på flera dagar.
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_bike_sends_booking ON bike_sends(booking_code)");
 // Index som beror på kolumner ovan (skapas efter migrationen).
 db.exec("CREATE INDEX IF NOT EXISTS idx_bv_bike ON bv_bookings(has_bike)");
 

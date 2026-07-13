@@ -21,12 +21,18 @@ export interface BikeRow {
 const upsertBike = db.prepare(`
   INSERT INTO bike_sends (notify_date, booking_code, guest_name, phone, email, bike_label, status)
   VALUES (@notify_date, @booking_code, @guest_name, @phone, @email, @bike_label, 'pending')
-  ON CONFLICT(booking_code, notify_date) DO UPDATE SET
+  ON CONFLICT(booking_code) DO UPDATE SET
+    notify_date=CASE
+      WHEN bike_sends.status = 'sent' THEN bike_sends.notify_date
+      ELSE excluded.notify_date
+    END,
     guest_name=excluded.guest_name, phone=excluded.phone, email=excluded.email,
     bike_label=excluded.bike_label, updated_at=datetime('now')
 `);
 
-// Importerar dagens cykelbokningar till bike_sends.
+// Importerar cykelbokningar vars ANKOMSTDAG är datumet. Databasens unika
+// booking_code-index innebär att samma bokning bara kan få en avisering,
+// oavsett om cykeln är hyrd en eller flera dagar.
 export function prepareBikeSends(date: string): BikeRow[] {
   const bikes = getBikeArrivalsForDate(date);
   const tx = db.transaction(() => {
