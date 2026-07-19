@@ -48,6 +48,8 @@ interface ScrapedRow {
   room: string;
   date: string;
   guest: string;
+  bookingHref?: string;
+  guestHref?: string;
 }
 
 async function shot(page: Page, name: string) {
@@ -147,7 +149,8 @@ async function scrapeTable(page: Page): Promise<ScrapedRow[]> {
       if (idx.room < 0 || idx.code < 0) continue; // fel tabell
       const out = [];
       for (const tr of Array.from(table.querySelectorAll("tbody tr"))) {
-        const cells = Array.from(tr.querySelectorAll("td")).map((td) => (td.textContent || "").trim());
+        const cellEls = Array.from(tr.querySelectorAll("td"));
+        const cells = cellEls.map((td) => (td.textContent || "").trim());
         if (cells.length < headers.length - 1) continue; // summeringsrad ("Totalt:")
         const bookingCode = cells[idx.code] || "";
         if (!/^[A-Z0-9]{6,}$/.test(bookingCode)) continue;
@@ -156,6 +159,8 @@ async function scrapeTable(page: Page): Promise<ScrapedRow[]> {
           room: idx.room >= 0 ? (cells[idx.room] || "") : "",
           date: idx.date >= 0 ? (cells[idx.date] || "") : "",
           guest: idx.guest >= 0 ? (cells[idx.guest] || "") : "",
+          bookingHref: idx.code >= 0 ? (cellEls[idx.code].querySelector("a")?.href || "") : "",
+          guestHref: idx.guest >= 0 ? (cellEls[idx.guest].querySelector("a")?.href || "") : "",
         });
       }
       return out;
@@ -163,7 +168,13 @@ async function scrapeTable(page: Page): Promise<ScrapedRow[]> {
     return [];
   })()`)) as ScrapedRow[];
   console.log(`✓ Läste ${rows.length} rader ur tabellen.`);
-  for (const r of rows) console.log(`   ${r.bookingCode}  ${r.date}  ${r.room}  (${r.guest})`);
+  for (const r of rows) {
+    console.log(
+      `   ${r.bookingCode}  ${r.date}  ${r.room}  (${r.guest})` +
+        (r.bookingHref ? ` booking=${r.bookingHref}` : "") +
+        (r.guestHref ? ` guest=${r.guestHref}` : ""),
+    );
+  }
   return rows;
 }
 
