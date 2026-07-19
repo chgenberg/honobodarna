@@ -108,6 +108,8 @@ app.post("/api/upload-arrivals", async (c) => {
           room: String(a.room ?? ""),
           date: String(a.date ?? ""),
           guest: String(a.guest ?? ""),
+          phone: String(a.phone ?? ""),
+          email: String(a.email ?? ""),
         })),
       );
     } else {

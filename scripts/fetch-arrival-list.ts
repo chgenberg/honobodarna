@@ -18,7 +18,7 @@
 //   BOOKVISIT_LOGIN_URL              default https://admin.bookvisit.com/Account/Login
 //   ARRIVAL_DATE                     YYYY-MM-DD (default = idag i Europe/Stockholm)
 //   HEADFUL=1                        synlig webbläsare vid lokal felsökning
-import { chromium, type Page } from "playwright";
+import { chromium, type BrowserContext, type Page } from "playwright";
 
 function need(name: string): string {
   const v = process.env[name];
@@ -50,6 +50,8 @@ interface ScrapedRow {
   guest: string;
   bookingHref?: string;
   guestHref?: string;
+  phone?: string;
+  email?: string;
 }
 
 async function shot(page: Page, name: string) {
@@ -178,26 +180,79 @@ async function scrapeTable(page: Page): Promise<ScrapedRow[]> {
   return rows;
 }
 
-async function uploadToApp(rows: ScrapedRow[]) {
+interface UploadResponse {
+  ok?: boolean;
+  rows?: number;
+  assigned?: number;
+  unresolved?: string[];
+  missingFromApi?: string[];
+  error?: string;
+}
+
+async function uploadToApp(rows: ScrapedRow[]): Promise<UploadResponse> {
   const url = `${need("APP_UPLOAD_URL")}?token=${encodeURIComponent(need("CRON_SECRET"))}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ assignments: rows }),
   });
-  const json = (await res.json().catch(() => ({}))) as {
-    ok?: boolean;
-    rows?: number;
-    assigned?: number;
-    unresolved?: string[];
-    error?: string;
-  };
+  const json = (await res.json().catch(() => ({}))) as UploadResponse;
   console.log(`Upload → ${res.status}:`, JSON.stringify(json));
   if (!res.ok || !json.ok) throw new Error(`Uppladdning misslyckades: ${json.error ?? res.status}`);
   if (json.unresolved?.length) {
     console.warn(`⚠️ Okända rum (matchade ingen sjöbod): ${json.unresolved.join(", ")}`);
   }
   console.log(`✓ Klart: ${json.assigned}/${json.rows} rader tilldelade sjöbod.`);
+  return json;
+}
+
+async function scrapeContact(
+  ctx: BrowserContext,
+  row: ScrapedRow,
+): Promise<{ phone: string; email: string }> {
+  if (!row.bookingHref) return { phone: "", email: "" };
+  const detail = await ctx.newPage();
+  try {
+    await detail.goto(row.bookingHref, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await detail.waitForTimeout(2500);
+
+    // Bokningsdetaljen är ett formulär. Välj fält utifrån type/name/id/
+    // placeholder/aria-label så vi inte råkar ta hotellets kontaktuppgifter.
+    const contact = (await detail.evaluate(`(() => {
+      const fields = Array.from(document.querySelectorAll("input, textarea"));
+      const key = (el) => [
+        el.type, el.name, el.id, el.placeholder,
+        el.getAttribute("aria-label"), el.getAttribute("data-testid")
+      ].filter(Boolean).join(" ").toLowerCase();
+      const value = (el) => (el.value || el.textContent || "").trim();
+      const emailField = fields.find((el) =>
+        el.type === "email" || /(^|\\W)(e-?mail|epost|e-post)(\\W|$)/i.test(key(el))
+      );
+      const phoneField = fields.find((el) =>
+        el.type === "tel" || /(^|\\W)(phone|telefon|mobile|mobil)(\\W|$)/i.test(key(el))
+      );
+      const mailLink = document.querySelector('a[href^="mailto:"]');
+      const telLink = document.querySelector('a[href^="tel:"]');
+      return {
+        email: value(emailField || {}) || (mailLink?.getAttribute("href") || "").replace(/^mailto:/i, ""),
+        phone: value(phoneField || {}) || (telLink?.getAttribute("href") || "").replace(/^tel:/i, ""),
+        fieldKeys: fields.map(key).filter(Boolean).slice(0, 80)
+      };
+    })()`)) as { email: string; phone: string; fieldKeys: string[] };
+
+    console.log(
+      `   Kontakt ${row.bookingCode}: telefon=${contact.phone ? "ja" : "nej"}, e-post=${contact.email ? "ja" : "nej"}`,
+    );
+    if (!contact.phone && !contact.email) {
+      console.warn(
+        `   Kontaktfält hittades inte. Fältmetadata: ${contact.fieldKeys.join(" | ")}`,
+      );
+      await shot(detail, `contact-missing-${row.bookingCode}`);
+    }
+    return { phone: contact.phone, email: contact.email };
+  } finally {
+    await detail.close();
+  }
 }
 
 async function attempt(attemptNo: number): Promise<void> {
@@ -218,7 +273,20 @@ async function attempt(attemptNo: number): Promise<void> {
       console.log("Inga ankomstrader hittades (kan vara en dag utan incheckningar).");
       return;
     }
-    await uploadToApp(filtered);
+    const firstUpload = await uploadToApp(filtered);
+
+    // Frontdesk/PMS-bokningar kan saknas helt i REST-API:t (404). Öppna bara
+    // dessa bokningsdetaljer, hämta telefon/e-post och komplettera reservankomsten.
+    const missing = new Set(firstUpload.missingFromApi ?? []);
+    if (missing.size > 0) {
+      console.log(`Kompletterar ${missing.size} bokning(ar) som saknas i REST-API:t…`);
+      const enriched: ScrapedRow[] = [];
+      for (const row of filtered.filter((r) => missing.has(r.bookingCode))) {
+        const contact = await scrapeContact(ctx, row);
+        enriched.push({ ...row, ...contact });
+      }
+      await uploadToApp(enriched);
+    }
   } catch (err) {
     await shot(page, `failure-${attemptNo}`);
     throw err;
