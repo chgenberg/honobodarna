@@ -171,11 +171,7 @@ async function scrapeTable(page: Page): Promise<ScrapedRow[]> {
   })()`)) as ScrapedRow[];
   console.log(`✓ Läste ${rows.length} rader ur tabellen.`);
   for (const r of rows) {
-    console.log(
-      `   ${r.bookingCode}  ${r.date}  ${r.room}  (${r.guest})` +
-        (r.bookingHref ? ` booking=${r.bookingHref}` : "") +
-        (r.guestHref ? ` guest=${r.guestHref}` : ""),
-    );
+    console.log(`   ${r.bookingCode}  ${r.date}  ${r.room}  (${r.guest})`);
   }
   return rows;
 }
