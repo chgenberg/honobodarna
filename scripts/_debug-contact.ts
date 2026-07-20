@@ -28,9 +28,13 @@ function mask(v: string): string {
   const page = await browser.newPage();
   try {
     await page.goto("https://admin.bookvisit.com/Account/Login", { waitUntil: "domcontentloaded" });
+    page.setDefaultTimeout(60_000);
     await page.locator('input[type="email"], input[type="text"]').first().fill(need("BOOKVISIT_USER"));
     await page.locator('input[type="password"]').first().fill(need("BOOKVISIT_PASS"));
-    await page.locator('a:has-text("Fortsätt"), button[type="submit"]').first().click();
+    await page
+      .locator('a:has-text("Fortsätt"), button:has-text("Fortsätt"), button[type="submit"], input[type="submit"]')
+      .first()
+      .click();
     await page.waitForURL((u) => !u.pathname.toLowerCase().includes("/account/login"), { timeout: 60_000 });
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
     await page.waitForTimeout(4000);
