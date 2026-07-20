@@ -59,6 +59,19 @@ function mask(v: string): string {
       phoneLike: string[];
     };
 
+    // Ny extraktion: läs "Telefon"- och "Email"-etiketterna i Gästinformation.
+    const labelBased = (await page.evaluate(`(() => {
+      const t = document.body.innerText || "";
+      const tel = t.match(/Telefon\\s*[|:]?\\s*(\\+?\\d[\\d ()\\-]{6,}\\d)/i);
+      const mail = document.querySelector('a[href^="mailto:"]');
+      const emMatch = t.match(/(?:Email|E-?post)\\s*[|:]?\\s*([^\\s|]+@[^\\s|]+)/i);
+      return {
+        phone: tel ? tel[1].trim() : "",
+        email: mail ? (mail.getAttribute("href")||"").replace(/^mailto:/i,"") : (emMatch ? emMatch[1].trim() : "")
+      };
+    })()`)) as { phone: string; email: string };
+    console.log("ETIKETT-BASERAD extraktion → telefon:", mask(labelBased.phone), "| e-post:", labelBased.email || "(tom)");
+
     console.log(`\n=== Bokning ${code} ===`);
     console.log("Fält (maskerade):");
     for (const f of dump.fields) console.log(`  [${f.type}] ${f.label || "(ingen label)"} = ${mask(f.value)}`);
