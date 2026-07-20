@@ -212,37 +212,25 @@ async function scrapeContact(
     await detail.goto(row.bookingHref, { waitUntil: "domcontentloaded", timeout: 60_000 });
     await detail.waitForTimeout(2500);
 
-    // Bokningsdetaljen är ett formulär. Välj fält utifrån type/name/id/
-    // placeholder/aria-label så vi inte råkar ta hotellets kontaktuppgifter.
+    // Gästinformationen på bokningsdetaljen visas som ren text ("Telefon | …",
+    // "Email | …"), inte som formulärfält. Läs etiketterna direkt; falla tillbaka
+    // på tel:/mailto:-länkar. OBS: sträng-evaluate pga tsx __name-injektion.
     const contact = (await detail.evaluate(`(() => {
-      const fields = Array.from(document.querySelectorAll("input, textarea"));
-      const key = (el) => [
-        el.type, el.name, el.id, el.placeholder,
-        el.getAttribute("aria-label"), el.getAttribute("data-testid")
-      ].filter(Boolean).join(" ").toLowerCase();
-      const value = (el) => (el.value || el.textContent || "").trim();
-      const emailField = fields.find((el) =>
-        el.type === "email" || /(^|\\W)(e-?mail|epost|e-post)(\\W|$)/i.test(key(el))
-      );
-      const phoneField = fields.find((el) =>
-        el.type === "tel" || /(^|\\W)(phone|telefon|mobile|mobil)(\\W|$)/i.test(key(el))
-      );
-      const mailLink = document.querySelector('a[href^="mailto:"]');
+      const text = document.body.innerText || "";
+      const telMatch = text.match(/Telefon\\s*[|:]?\\s*(\\+?\\d[\\d ()\\-]{6,}\\d)/i);
       const telLink = document.querySelector('a[href^="tel:"]');
-      return {
-        email: value(emailField || {}) || (mailLink?.getAttribute("href") || "").replace(/^mailto:/i, ""),
-        phone: value(phoneField || {}) || (telLink?.getAttribute("href") || "").replace(/^tel:/i, ""),
-        fieldKeys: fields.map(key).filter(Boolean).slice(0, 80)
-      };
-    })()`)) as { email: string; phone: string; fieldKeys: string[] };
+      const phone = (telMatch ? telMatch[1] : (telLink?.getAttribute("href") || "").replace(/^tel:/i, "")).trim();
+      const mailLink = document.querySelector('a[href^="mailto:"]');
+      const emMatch = text.match(/(?:Email|E-?post)\\s*[|:]?\\s*([^\\s|]+@[^\\s|]+)/i);
+      const email = ((mailLink?.getAttribute("href") || "").replace(/^mailto:/i, "") || (emMatch ? emMatch[1] : "")).trim();
+      return { email, phone };
+    })()`)) as { email: string; phone: string };
 
     console.log(
       `   Kontakt ${row.bookingCode}: telefon=${contact.phone ? "ja" : "nej"}, e-post=${contact.email ? "ja" : "nej"}`,
     );
     if (!contact.phone && !contact.email) {
-      console.warn(
-        `   Kontaktfält hittades inte. Fältmetadata: ${contact.fieldKeys.join(" | ")}`,
-      );
+      console.warn(`   Inga kontaktuppgifter hittades på detaljsidan för ${row.bookingCode}.`);
       await shot(detail, `contact-missing-${row.bookingCode}`);
     }
     return { phone: contact.phone, email: contact.email };
