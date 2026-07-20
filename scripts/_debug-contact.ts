@@ -25,7 +25,8 @@ function mask(v: string): string {
 
 (async () => {
   const browser = await chromium.launch();
-  const page = await browser.newPage();
+  const ctx = await browser.newContext({ locale: "sv-SE", timezoneId: "Europe/Stockholm" });
+  const page = await ctx.newPage();
   try {
     await page.goto("https://admin.bookvisit.com/Account/Login", { waitUntil: "domcontentloaded" });
     page.setDefaultTimeout(60_000);
