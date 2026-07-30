@@ -89,15 +89,28 @@ export interface RawBooking {
     roomDescriptions?: Array<{ id?: string; name?: string }>;
     addOnDescriptions?: Array<{ id?: string; name?: string }>;
     packageDescriptions?: Array<{ id?: string; name?: string }>;
+    optionalAddOns?: Array<{ addOnId?: string; date?: string }>;
   };
 }
 
-// Identifierar cykel-tillägg ("Cykel"/"Bikes") i en bokning.
+// Identifierar cykel-tillägg ("Cykel"/"Bikes") i en bokning och tilläggets DATUM.
+// Viktigt: när cykeln ligger som tillägg på en boendebokning kan cykeldatumet
+// (optionalAddOns[].date) skilja sig från boendets startDate. Aviseringen ska
+// gå ut på cykeldatumet – inte incheckningsdatumet.
 const BIKE_RE = /cyk|\bbikes?\b/i;
-function bikeInfo(bd?: RawBooking["bookingData"]): { hasBike: boolean; label: string | null } {
-  const names = (bd?.addOnDescriptions ?? []).map((a) => a?.name).filter(Boolean) as string[];
-  const match = names.find((n) => BIKE_RE.test(n));
-  return { hasBike: Boolean(match), label: match ?? null };
+function bikeInfo(bd?: RawBooking["bookingData"]): {
+  hasBike: boolean;
+  label: string | null;
+  bikeDate: string | null;
+} {
+  const bikeDesc = (bd?.addOnDescriptions ?? []).find((d) => d?.name && BIKE_RE.test(d.name));
+  if (!bikeDesc) return { hasBike: false, label: null, bikeDate: null };
+  // Tidigaste datumet för cykel-tillägget (matchat på addOnId).
+  const dates = (bd?.optionalAddOns ?? [])
+    .filter((a) => a?.addOnId && a.addOnId === bikeDesc.id && a?.date)
+    .map((a) => String(a.date).slice(0, 10))
+    .sort();
+  return { hasBike: true, label: bikeDesc.name ?? null, bikeDate: dates[0] ?? null };
 }
 
 // Identifierar middagspaketet (sjöbod + middag på Tullhuset). OBS: skaldjurspaketet
@@ -192,18 +205,18 @@ const upsertBooking = db.prepare(`
   INSERT INTO bv_bookings
     (booking_code, booking_guid, arrival_date, departure_date, status,
      guest_name, phone, phone_country, email, room_id, room_type_label,
-     has_bike, bike_label, has_package, package_label, has_seafood, seafood_label, updated_at)
+     has_bike, bike_label, bike_date, has_package, package_label, has_seafood, seafood_label, updated_at)
   VALUES
     (@booking_code, @booking_guid, @arrival_date, @departure_date, @status,
      @guest_name, @phone, @phone_country, @email, @room_id, @room_type_label,
-     @has_bike, @bike_label, @has_package, @package_label, @has_seafood, @seafood_label, datetime('now'))
+     @has_bike, @bike_label, @bike_date, @has_package, @package_label, @has_seafood, @seafood_label, datetime('now'))
   ON CONFLICT(booking_code) DO UPDATE SET
     booking_guid=excluded.booking_guid, arrival_date=excluded.arrival_date,
     departure_date=excluded.departure_date, status=excluded.status,
     guest_name=excluded.guest_name, phone=excluded.phone,
     phone_country=excluded.phone_country, email=excluded.email,
     room_id=excluded.room_id, room_type_label=excluded.room_type_label,
-    has_bike=excluded.has_bike, bike_label=excluded.bike_label,
+    has_bike=excluded.has_bike, bike_label=excluded.bike_label, bike_date=excluded.bike_date,
     has_package=excluded.has_package, package_label=excluded.package_label,
     has_seafood=excluded.has_seafood, seafood_label=excluded.seafood_label,
     updated_at=datetime('now')
@@ -236,6 +249,7 @@ function storeBooking(code: string, b: RawBooking): void {
     room_type_label: label,
     has_bike: bike.hasBike ? 1 : 0,
     bike_label: bike.label,
+    bike_date: bike.bikeDate,
     has_package: pkg.hasPackage ? 1 : 0,
     package_label: pkg.label,
     has_seafood: pkg.hasSeafood ? 1 : 0,
@@ -400,13 +414,15 @@ export interface CachedBike {
   bike_label: string | null;
 }
 
-// Cykelbokningar för ett datum (boende + standalone) ur speglingen.
+// Cykelbokningar för ett datum ur speglingen. Aviseras på CYKELNS datum
+// (optionalAddOns[].date). För äldre/standalone-cykelbokningar saknas eget
+// cykeldatum → fall tillbaka på bokningens ankomstdatum.
 export function getBikeArrivalsForDate(date: string): CachedBike[] {
   return db
     .prepare(
       `SELECT booking_code, arrival_date, guest_name, phone, email, bike_label
        FROM bv_bookings
-       WHERE arrival_date = ? AND status IS NOT 'Cancelled' AND has_bike = 1
+       WHERE COALESCE(bike_date, arrival_date) = ? AND status IS NOT 'Cancelled' AND has_bike = 1
        ORDER BY guest_name`,
     )
     .all(date) as CachedBike[];

@@ -185,6 +185,8 @@ ensureColumn("message_log", "delivered_at", "TEXT");
 // Skaldjurspaket (levereras till sjöboden – EJ samma som middagspaketet).
 ensureColumn("bv_bookings", "has_seafood", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("bv_bookings", "seafood_label", "TEXT");
+// Cykel-tilläggets eget datum (kan skilja sig från boendets ankomstdatum).
+ensureColumn("bv_bookings", "bike_date", "TEXT");
 ensureColumn("arrivals", "has_seafood", "INTEGER NOT NULL DEFAULT 0");
 
 // En cykelavisering per BookVisit-bokning, oavsett hyreslängd/datum.
