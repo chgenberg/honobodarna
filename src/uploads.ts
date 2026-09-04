@@ -54,11 +54,14 @@ function resolveCabinId(roomName: string): number | null {
   return null;
 }
 
+const deleteAssignments = db.prepare(
+  "DELETE FROM room_assignments WHERE booking_code = ? AND ifnull(arrival_date, '') = ?",
+);
 const upsertAssignment = db.prepare(`
   INSERT INTO room_assignments (booking_code, arrival_date, room_name, cabin_id, guest_name, source)
   VALUES (@booking_code, @arrival_date, @room_name, @cabin_id, @guest_name, 'upload')
-  ON CONFLICT(booking_code, arrival_date) DO UPDATE SET
-    room_name=excluded.room_name, cabin_id=excluded.cabin_id,
+  ON CONFLICT(booking_code, arrival_date, cabin_id) DO UPDATE SET
+    room_name=excluded.room_name,
     guest_name=excluded.guest_name, created_at=datetime('now')
 `);
 
@@ -110,6 +113,18 @@ export function applyAssignments(items: AssignmentInput[]): UploadSummary {
   const missingFromApi = new Set<string>();
 
   const tx = db.transaction(() => {
+    const cleared = new Set<string>();
+    for (const it of items) {
+      const bookingCode = it.bookingCode.trim();
+      if (!bookingCode) continue;
+      const date = toDate(it.date.trim());
+      const key = `${bookingCode}\0${date}`;
+      if (!cleared.has(key)) {
+        cleared.add(key);
+        deleteAssignments.run(bookingCode, date);
+      }
+    }
+
     for (const it of items) {
       const bookingCode = it.bookingCode.trim();
       if (!bookingCode) continue;
@@ -181,12 +196,24 @@ export function parseAndApplyArrivalList(buffer: Buffer): UploadSummary {
   );
 }
 
-export function getAssignment(bookingCode: string, date: string): { cabin_id: number | null; room_name: string | null } | undefined {
+export function getAssignments(
+  bookingCode: string,
+  date: string,
+): Array<{ cabin_id: number | null; room_name: string | null }> {
   return db
     .prepare(
-      "SELECT cabin_id, room_name FROM room_assignments WHERE booking_code = ? AND (arrival_date = ? OR arrival_date IS NULL) ORDER BY arrival_date DESC LIMIT 1",
+      `SELECT cabin_id, room_name FROM room_assignments
+       WHERE booking_code = ? AND (arrival_date = ? OR arrival_date IS NULL)
+       ORDER BY id`,
     )
-    .get(bookingCode, date) as { cabin_id: number | null; room_name: string | null } | undefined;
+    .all(bookingCode, date) as Array<{ cabin_id: number | null; room_name: string | null }>;
+}
+
+export function getAssignment(
+  bookingCode: string,
+  date: string,
+): { cabin_id: number | null; room_name: string | null } | undefined {
+  return getAssignments(bookingCode, date)[0];
 }
 
 export function countAssignmentsForDate(date: string): number {

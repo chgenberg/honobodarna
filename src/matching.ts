@@ -23,6 +23,37 @@ export function getCabin(id: number): Cabin | undefined {
   return db.prepare("SELECT * FROM cabins WHERE id = ?").get(id) as Cabin | undefined;
 }
 
+export function isVillaCabin(c: Pick<Cabin, "name" | "room_type_label">): boolean {
+  return /villa/i.test(`${c.room_type_label ?? ""} ${c.name ?? ""}`);
+}
+
+const listAssignedCabinIds = db.prepare(
+  `SELECT cabin_id FROM room_assignments
+   WHERE booking_code = ? AND (arrival_date = ? OR arrival_date IS NULL)
+     AND cabin_id IS NOT NULL
+   ORDER BY id`,
+);
+
+// Alla fysiska stugor kopplade till en bokning (Frontdesk/Excel), annars
+// den manuellt satta arrivals.cabin_id. Sorterade i sjöbodsordning.
+export function getCabinsForBooking(
+  bookingCode: string,
+  date: string,
+  fallbackCabinId?: number | null,
+): Cabin[] {
+  const rows = listAssignedCabinIds.all(bookingCode, date) as Array<{ cabin_id: number }>;
+  const ids: number[] = [];
+  for (const r of rows) {
+    if (!ids.includes(r.cabin_id)) ids.push(r.cabin_id);
+  }
+  if (ids.length === 0 && fallbackCabinId != null) ids.push(fallbackCabinId);
+
+  return ids
+    .map((id) => getCabin(id))
+    .filter((c): c is Cabin => !!c)
+    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, "sv"));
+}
+
 // Tilldelar fysiska stugor till ankomster för ett datum. REGEL: gissa ALDRIG.
 // En sjöbod sätts bara när den kan utläsas säkert:
 //  1. uppladdad/skrapad ankomstlista (auktoritativ, överstyr gissning)
@@ -50,17 +81,15 @@ export function assignCabinsForDate(date: string): void {
   const update = db.prepare(
     "UPDATE arrivals SET cabin_id = ?, needs_review = ?, updated_at = datetime('now') WHERE id = ?",
   );
-  const getUpload = db.prepare(
-    "SELECT cabin_id FROM room_assignments WHERE booking_code = ? AND (arrival_date = ? OR arrival_date IS NULL) ORDER BY arrival_date DESC LIMIT 1",
-  );
 
   for (const a of arrivals) {
     if (a.status === "sent") continue;
 
-    // 1) Uppladdad/skrapad ankomstlista är auktoritativ.
-    const up = getUpload.get(a.booking_code, date) as { cabin_id: number | null } | undefined;
-    if (up && up.cabin_id != null) {
-      update.run(up.cabin_id, 0, a.id);
+    // 1) Uppladdad/skrapad ankomstlista är auktoritativ (kan vara flera stugor).
+    const assigned = getCabinsForBooking(a.booking_code, date);
+    if (assigned.length > 0) {
+      const mixed = assigned.some(isVillaCabin) && assigned.some((c) => !isVillaCabin(c));
+      update.run(assigned[0].id, mixed ? 1 : 0, a.id);
       continue;
     }
 

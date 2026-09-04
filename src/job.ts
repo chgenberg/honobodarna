@@ -1,13 +1,13 @@
 import { db } from "./db.js";
 import { getArrivalsForDate, syncBookings, normalizePhone } from "./bookvisit.js";
-import { assignCabinsForDate, getCabin } from "./matching.js";
+import { assignCabinsForDate, getCabinsForBooking, isVillaCabin } from "./matching.js";
 import { sendSms } from "./sms.js";
 import { sendEmail } from "./email.js";
 import { config } from "./config.js";
 import { todayInTz } from "./dates.js";
 import { runBikeNotifications, type BikeJobResult } from "./bikes.js";
 import { sendReviewAlert, sendDailySummary } from "./notify.js";
-import { getTemplate, langForPhone, render } from "./templates.js";
+import { langForPhone, renderArrivalMessage } from "./templates.js";
 
 export interface ArrivalRow {
   id: number;
@@ -120,11 +120,19 @@ export async function sendForArrival(id: number, opts: { force?: boolean } = {})
     return { arrivalId: id, guest: a.guest_name ?? "?", channel: "none", status: "skipped" };
   }
 
-  const cabin = a.cabin_id ? getCabin(a.cabin_id) : undefined;
+  const cabins = getCabinsForBooking(a.booking_code, a.arrival_date, a.cabin_id);
+  const missingCode = cabins.filter((c) => !c.door_code);
 
-  if (!cabin || !cabin.door_code) {
+  if (cabins.length === 0 || missingCode.length === cabins.length) {
     db.prepare("UPDATE arrivals SET status='skipped', note=?, updated_at=datetime('now') WHERE id=?").run(
       "Ingen stuga/kod tilldelad",
+      id,
+    );
+    return { arrivalId: id, guest: a.guest_name ?? "?", channel: "none", status: "skipped" };
+  }
+  if (missingCode.length) {
+    db.prepare("UPDATE arrivals SET status='skipped', note=?, updated_at=datetime('now') WHERE id=?").run(
+      `Saknar dörrkod för ${missingCode.map((c) => c.name).join(", ")}`,
       id,
     );
     return { arrivalId: id, guest: a.guest_name ?? "?", channel: "none", status: "skipped" };
@@ -132,27 +140,16 @@ export async function sendForArrival(id: number, opts: { force?: boolean } = {})
 
   // Paket (sjöbod + middag) → pakettext; villa → villatext; annars sjöbod-text.
   // Språk styrs av numret (+46 = svenska, annars engelska).
-  const isVilla = /villa/i.test(`${cabin.room_type_label ?? ""} ${cabin.name ?? ""}`);
-  const type = a.is_package ? "package" : isVilla ? "villa" : "sjobod";
+  const allVilla = cabins.every(isVillaCabin);
+  const type = a.is_package ? "package" : allVilla ? "villa" : "sjobod";
   const lang = langForPhone(a.phone);
-  const tmpl = getTemplate(type, lang);
-
-  const vars = {
-    namn: (a.guest_name ?? "gäst").split(" ")[0],
-    fulltnamn: a.guest_name ?? "gäst",
-    stuga: cabin.name,
-    kod: cabin.door_code,
-  };
-  let body = render(tmpl.text, vars);
-
-  // Skaldjurspaket (levereras till sjöboden): vanligt incheckningsmeddelande
-  // med en extra rad på slutet – EJ middagspaketets text.
-  if (a.has_seafood) {
-    body +=
-      lang === "sv"
-        ? "\n\nErt skaldjurspaket finns på plats i sjöboden vid incheckning."
-        : "\n\nYour seafood package will be in place in the cabin at check-in.";
-  }
+  const { subject, body } = renderArrivalMessage({
+    type,
+    lang,
+    guestName: a.guest_name ?? "gäst",
+    cabins,
+    hasSeafood: !!a.has_seafood,
+  });
 
   // Skicka via BÅDA kanalerna när gästen har både telefon och e-post.
   // VIKTIGT: logga varje kanal DIREKT efter att den skickats – 46elks
@@ -173,7 +170,7 @@ export async function sendForArrival(id: number, opts: { force?: boolean } = {})
     attempts.push({ channel, r });
   };
   if (a.phone) logAttempt("sms", await sendSms(a.phone, body));
-  if (a.email) logAttempt("email", await sendEmail(a.email, render(tmpl.subject, vars), body));
+  if (a.email) logAttempt("email", await sendEmail(a.email, subject, body));
 
   if (attempts.length === 0) {
     db.prepare("UPDATE arrivals SET status='skipped', note=?, updated_at=datetime('now') WHERE id=?").run(

@@ -12,7 +12,8 @@
     "start": "tsx src/index.tsx",
     "seed": "tsx scripts/seed.ts",
     "send:today": "tsx scripts/run-job.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify:multi-cabin": "tsx scripts/verify-multi-cabin.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

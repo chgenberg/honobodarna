@@ -58,6 +58,12 @@ export const LoginPage: FC<{ error?: string }> = ({ error }) => (
   </html>
 );
 
+export interface ArrivalCabinView {
+  id: number;
+  name: string;
+  door_code: string;
+}
+
 export interface ArrivalView {
   id: number;
   guest_name: string | null;
@@ -67,6 +73,7 @@ export interface ArrivalView {
   cabin_id: number | null;
   cabin_name: string | null;
   door_code: string | null;
+  assigned_cabins: ArrivalCabinView[];
   status: string;
   channel: string | null;
   needs_review: number;
@@ -102,6 +109,9 @@ const ArrivalTable: FC<{ arrivals: ArrivalView[]; cabins: Cabin[]; date: string;
               <div class="guest-cell">
                 <strong>{a.guest_name}</strong>
                 {a.needs_review ? <span class="pill review tiny">Granska matchning</span> : null}
+                {a.assigned_cabins.length > 1 ? (
+                  <span class="pill tiny">{a.assigned_cabins.length} sjöbodar</span>
+                ) : null}
                 {a.has_seafood ? <span class="pill sent tiny">Skaldjurspaket</span> : null}
               </div>
             </td>
@@ -112,22 +122,46 @@ const ArrivalTable: FC<{ arrivals: ArrivalView[]; cabins: Cabin[]; date: string;
             </td>
             <td class="muted" data-label="Rumstyp">{a.room_type_label ?? "–"}</td>
             <td data-label="Sjöbod">
-              <form method="post" action="/assign" class="inline-form">
-                <input type="hidden" name="arrival_id" value={String(a.id)} />
-                <input type="hidden" name="date" value={date} />
-                <span class="select-wrap" style="min-width:150px;">
-                  <select name="cabin_id" onchange="this.form.submit()">
-                    <option value="">– välj sjöbod –</option>
-                    {cabins.map((c) => (
-                      <option value={String(c.id)} selected={a.cabin_id === c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </span>
-              </form>
+              {a.assigned_cabins.length > 1 ? (
+                <div class="cabin-stack">
+                  {a.assigned_cabins.map((c) => (
+                    <span class="cabin-name">{c.name}</span>
+                  ))}
+                </div>
+              ) : (
+                <form method="post" action="/assign" class="inline-form">
+                  <input type="hidden" name="arrival_id" value={String(a.id)} />
+                  <input type="hidden" name="date" value={date} />
+                  <span class="select-wrap" style="min-width:150px;">
+                    <select name="cabin_id" onchange="this.form.submit()">
+                      <option value="">– välj sjöbod –</option>
+                      {cabins.map((c) => (
+                        <option value={String(c.id)} selected={a.cabin_id === c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </span>
+                </form>
+              )}
             </td>
-            <td data-label="Kod">{a.door_code ? <span class="code-chip">{a.door_code}</span> : <span class="muted">–</span>}</td>
+            <td data-label="Kod">
+              {a.assigned_cabins.length > 0 ? (
+                <div class="cabin-stack">
+                  {a.assigned_cabins.map((c) =>
+                    c.door_code ? (
+                      <span class="code-chip">{c.door_code}</span>
+                    ) : (
+                      <span class="muted">–</span>
+                    ),
+                  )}
+                </div>
+              ) : a.door_code ? (
+                <span class="code-chip">{a.door_code}</span>
+              ) : (
+                <span class="muted">–</span>
+              )}
+            </td>
             <td data-label="Status">{statusPill(a.status)}</td>
             <td>
               <form method="post" action="/send-one" class="inline-form">

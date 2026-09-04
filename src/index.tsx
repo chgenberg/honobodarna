@@ -21,7 +21,7 @@ import {
   type Lang,
 } from "./templates.js";
 import { requireAuth, verifyCredentials, issueSession, clearSession } from "./auth.js";
-import { listCabins, getCabin } from "./matching.js";
+import { listCabins, getCabin, getCabinsForBooking } from "./matching.js";
 import { bookingCount, getRoomTypes, syncBookings, countRoomlessForDate } from "./bookvisit.js";
 import {
   rebuildCustomers,
@@ -167,7 +167,8 @@ function redirectFlash(path: string, type: string, msg: string): string {
 
 function enrichArrivals(rows: ArrivalRow[]): ArrivalView[] {
   return rows.map((a) => {
-    const cabin = a.cabin_id ? getCabin(a.cabin_id) : undefined;
+    const assigned = getCabinsForBooking(a.booking_code, a.arrival_date, a.cabin_id);
+    const primary = assigned[0] ?? (a.cabin_id ? getCabin(a.cabin_id) : undefined);
     return {
       id: a.id,
       guest_name: a.guest_name,
@@ -175,8 +176,9 @@ function enrichArrivals(rows: ArrivalRow[]): ArrivalView[] {
       email: a.email,
       room_type_label: a.room_type_label,
       cabin_id: a.cabin_id,
-      cabin_name: cabin?.name ?? null,
-      door_code: cabin?.door_code ?? null,
+      cabin_name: primary?.name ?? null,
+      door_code: primary?.door_code ?? null,
+      assigned_cabins: assigned.map((c) => ({ id: c.id, name: c.name, door_code: c.door_code })),
       status: a.status,
       channel: a.channel,
       needs_review: a.needs_review,

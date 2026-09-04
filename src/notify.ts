@@ -4,7 +4,8 @@
 import { db } from "./db.js";
 import { config } from "./config.js";
 import { sendOpsEmail, sendEmail } from "./email.js";
-import { langForPhone } from "./templates.js";
+import { langForPhone, joinCabinNames } from "./templates.js";
+import { getCabinsForBooking } from "./matching.js";
 
 // Tar emot leveranskvitto från 46elks. Om ett SMS inte kom fram (t.ex. USA-nummer
 // som blockerar textavsändare) skickas dörrkoden automatiskt via e-post istället,
@@ -128,15 +129,35 @@ interface SummaryRow {
 }
 
 function rowsForDate(date: string): SummaryRow[] {
-  return db
+  const rows = db
     .prepare(
-      `SELECT a.guest_name, c.name AS cabin_name, a.status, a.channel, a.phone, a.email,
-              a.note, a.needs_review, a.is_package
-       FROM arrivals a LEFT JOIN cabins c ON c.id = a.cabin_id
+      `SELECT a.booking_code, a.arrival_date, a.guest_name, a.cabin_id, a.status, a.channel,
+              a.phone, a.email, a.note, a.needs_review, a.is_package
+       FROM arrivals a
        WHERE a.arrival_date = ? AND a.room_id IS NOT NULL
        ORDER BY a.guest_name`,
     )
-    .all(date) as SummaryRow[];
+    .all(date) as Array<
+    Omit<SummaryRow, "cabin_name"> & {
+      booking_code: string;
+      arrival_date: string;
+      cabin_id: number | null;
+    }
+  >;
+  return rows.map((r) => {
+    const cabins = getCabinsForBooking(r.booking_code, r.arrival_date, r.cabin_id);
+    return {
+      guest_name: r.guest_name,
+      cabin_name: cabins.length ? joinCabinNames(cabins.map((c) => c.name), "sv") : null,
+      status: r.status,
+      channel: r.channel,
+      phone: r.phone,
+      email: r.email,
+      note: r.note,
+      needs_review: r.needs_review,
+      is_package: r.is_package,
+    };
+  });
 }
 
 // Ankomster som saknar bekräftad sjöbod (systemet vägrar gissa → kräver åtgärd).

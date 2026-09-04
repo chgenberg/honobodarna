@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS bike_sends (
 
 -- Rumstilldelningar uppladdade från Annas ankomstlista (Excel). Auktoritativ källa
 -- för vilken fysisk sjöbod en gäst fått (det API:t inte exponerar).
+-- Unik per (bokning, datum, stuga) så en bokning kan ha flera sjöbodar.
 CREATE TABLE IF NOT EXISTS room_assignments (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   booking_code TEXT NOT NULL,
@@ -139,7 +140,7 @@ CREATE TABLE IF NOT EXISTS room_assignments (
   guest_name   TEXT,
   source       TEXT NOT NULL DEFAULT 'upload',
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (booking_code, arrival_date)
+  UNIQUE (booking_code, arrival_date, cabin_id)
 );
 
 -- Permanent kundregister (aggregeras från bokningarna, överlever rensning av gamla bokningar).
@@ -195,6 +196,39 @@ ensureColumn("arrivals", "has_seafood", "INTEGER NOT NULL DEFAULT 0");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_bike_sends_booking ON bike_sends(booking_code)");
 // Index som beror på kolumner ovan (skapas efter migrationen).
 db.exec("CREATE INDEX IF NOT EXISTS idx_bv_bike ON bv_bookings(has_bike)");
+
+// Äldre databaser hade UNIQUE(booking_code, arrival_date) och kunde därför
+// bara spara en sjöbod per bokning. Bygg om tabellen så flera rum får plats.
+function migrateRoomAssignmentsMultiCabin(): void {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'room_assignments'")
+    .get() as { sql: string } | undefined;
+  if (!row?.sql) return;
+  if (/UNIQUE\s*\(\s*booking_code\s*,\s*arrival_date\s*,\s*cabin_id\s*\)/i.test(row.sql)) return;
+
+  db.pragma("foreign_keys = OFF");
+  db.exec(`
+    CREATE TABLE room_assignments_new (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      booking_code TEXT NOT NULL,
+      arrival_date TEXT,
+      room_name    TEXT,
+      cabin_id     INTEGER REFERENCES cabins(id) ON DELETE SET NULL,
+      guest_name   TEXT,
+      source       TEXT NOT NULL DEFAULT 'upload',
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (booking_code, arrival_date, cabin_id)
+    );
+    INSERT INTO room_assignments_new
+      (id, booking_code, arrival_date, room_name, cabin_id, guest_name, source, created_at)
+    SELECT id, booking_code, arrival_date, room_name, cabin_id, guest_name, source, created_at
+    FROM room_assignments;
+    DROP TABLE room_assignments;
+    ALTER TABLE room_assignments_new RENAME TO room_assignments;
+  `);
+  db.pragma("foreign_keys = ON");
+}
+migrateRoomAssignmentsMultiCabin();
 
 export function getSetting(key: string): string | null {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as

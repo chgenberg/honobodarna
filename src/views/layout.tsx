@@ -179,6 +179,8 @@ tr:first-child td { border-top: none; }
 .pill.review { background: var(--amber-soft); color: var(--amber); animation: pulse 2.4s var(--ease) infinite; }
 .pill.tiny { font-size: 10.5px; padding: 3px 9px; white-space: nowrap; }
 .guest-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 2px 0; }
+.cabin-stack { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.cabin-stack .cabin-name { font-size: 13px; font-weight: 600; line-height: 1.3; }
 .guest-cell strong { line-height: 1.25; }
 .pill.sms, .pill.email { background: var(--sea-soft); color: var(--sea-deep); }
 @keyframes pulse { 0%,100%{ box-shadow: 0 0 0 0 rgba(151,101,31,.28);} 50%{ box-shadow: 0 0 0 5px rgba(151,101,31,0);} }
