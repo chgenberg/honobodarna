@@ -105,7 +105,10 @@ export const config = {
     repo: str("GITHUB_REPO", "chgenberg/honobodarna"),
     workflow: str("GITHUB_FETCH_WORKFLOW", "fetch-arrival-list.yml"),
     // Tider (Europe/Stockholm) då hämtningen triggas.
-    fetchSchedules: str("FETCH_SCHEDULES", "40 5 * * *;10 7 * * *;0 9 * * *"),
+    fetchSchedules: str(
+      "FETCH_SCHEDULES",
+      "40 5 * * *;10 7 * * *;0 9 * * *;0 12 * * *;0 15 * * *;0 17 * * *",
+    ),
   },
 };
 

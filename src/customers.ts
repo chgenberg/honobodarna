@@ -182,6 +182,20 @@ export function getCustomer(id: number): Customer | undefined {
   return db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as Customer | undefined;
 }
 
+// Exakt namnträff (normaliserat). Vid flera träffar gissar vi inte.
+export function findCustomerByName(name: string): Customer | undefined {
+  const n = name.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!n) return undefined;
+  const rows = db
+    .prepare(
+      `SELECT * FROM customers
+       WHERE lower(trim(name)) = ?
+         AND ((phone IS NOT NULL AND phone <> '') OR (email IS NOT NULL AND email <> ''))`,
+    )
+    .all(n) as Customer[];
+  return rows.length === 1 ? rows[0] : undefined;
+}
+
 export function customersWithPhone(): Customer[] {
   return db
     .prepare("SELECT * FROM customers WHERE phone IS NOT NULL AND phone <> '' ORDER BY name")

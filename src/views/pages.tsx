@@ -252,7 +252,7 @@ export const TodayPage: FC<TodayProps> = (p) => {
       <p class="help" style="margin-top:-6px;">
         {p.uploadedCount
           ? `✓ Ankomstlista uppladdad – ${p.uploadedCount} stuga${p.uploadedCount > 1 ? "/stugor" : ""} tilldelad${p.uploadedCount > 1 ? "e" : ""} från Excel för det här datumet.`
-          : "Tips: ladda upp dagens Ankomstlista (Excel) från BookVisit så fylls rätt sjöbod i automatiskt. Dra filen var som helst på sidan."}
+          : "Tips: \"Synka & uppdatera\" hämtar även Frontdesk-listan (samma-dags-bokningar). Eller släpp Ankomstlista (Excel) här – kontaktuppgifter fylls i från BookVisit/kundregistret."}
       </p>
 
       <div class="card">
@@ -375,7 +375,7 @@ export const TodayPage: FC<TodayProps> = (p) => {
     fetch('/upload-arrivals?date='+encodeURIComponent(date),{method:'POST',body:fd})
       .then(function(r){return r.json();})
       .then(function(j){
-        if(j&&j.ok){var m=j.assigned+' av '+j.rows+' rader kopplade till rätt sjöbod'+(j.unresolved&&j.unresolved.length?(' · okända rum: '+j.unresolved.join(', ')):'');go(m,true);}
+        if(j&&j.ok){var m=j.assigned+' av '+j.rows+' rader kopplade till rätt sjöbod'+(j.unresolved&&j.unresolved.length?(' · okända rum: '+j.unresolved.join(', ')):'')+(j.fetchStarted?'. Hämtar telefon/e-post från Frontdesk – ladda om sidan om en minut om kontakt saknas.':'');go(m,true);}
         else{go((j&&j.error)||'Kunde inte läsa filen',false);}
       })
       .catch(function(){go('Uppladdningen misslyckades',false);});

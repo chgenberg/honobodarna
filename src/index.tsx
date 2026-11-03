@@ -38,9 +38,11 @@ import {
   getRegularArrivals,
   getPackageArrivals,
   sendForArrival,
+  sendPendingArrivals,
   runMorningJob,
   type ArrivalRow,
 } from "./job.js";
+import { enrichMissingContacts } from "./enrich.js";
 import { sendSms } from "./sms.js";
 import { sendEmail } from "./email.js";
 import { todayInTz, isValidDate, humanDate } from "./dates.js";
@@ -124,11 +126,32 @@ app.post("/api/upload-arrivals", async (c) => {
     return c.json({ ok: false, error: "Kunde inte läsa datan: " + msg(err) }, 400);
   }
   const date = c.req.query("date") || todayInTz();
-  for (const d of new Set<string>([date, ...summary.dates])) {
+  const dates = [...new Set<string>([date, ...summary.dates])];
+  for (const d of dates) {
     try {
+      prepareArrivals(d);
+      await enrichMissingContacts(d);
       prepareArrivals(d);
     } catch {
       /* hoppa över datum utan ankomster */
+    }
+  }
+  // Sena bokningar efter morgonutskicket: skicka så fort Frontdesk-listan
+  // kommit in och sjöbod + kontakt är klara. Före morgonjobbet skickas inget.
+  const morningJobRan = db.prepare(
+    "SELECT 1 FROM job_runs WHERE run_date = ? AND trigger = 'cron' LIMIT 1",
+  );
+  if (config.autoSend) {
+    for (const d of dates) {
+      if (!morningJobRan.get(d)) continue;
+      try {
+        const outcomes = await sendPendingArrivals(d);
+        if (outcomes.some((o) => ["sent", "dry-run", "canary"].includes(o.status))) {
+          sendDailySummary(d).catch((e) => console.error("[upload-api] Bekräftelsemejl:", e));
+        }
+      } catch (err) {
+        console.error("[upload-api] Autoutskick misslyckades:", err);
+      }
     }
   }
   console.log(`[upload-api] ${summary.rows} rader, ${summary.assigned} tilldelade sjöbodar.`);
@@ -246,8 +269,12 @@ app.post("/run", async (c) => {
   const d = String(body.date ?? "") || todayInTz();
   try {
     const result = await runMorningJob({ date: d, trigger: "manual", send: false, sync: true });
+    const fetched = await triggerArrivalFetch(d);
+    const extra = fetched
+      ? " Hämtar ankomstlistan från Frontdesk – ladda om sidan om någon minut om en sen bokning saknas."
+      : "";
     return c.redirect(
-      redirectFlash(`/?date=${d}`, "ok", `Synkat. ${result.arrivalsFound} incheckningar för dagen.`),
+      redirectFlash(`/?date=${d}`, "ok", `Synkat. ${result.arrivalsFound} incheckningar för dagen.${extra}`),
     );
   } catch (err) {
     return c.redirect(redirectFlash(`/?date=${d}`, "err", "Synk misslyckades: " + msg(err)));
@@ -274,11 +301,15 @@ app.post("/upload-arrivals", async (c) => {
   for (const d of dates) {
     try {
       prepareArrivals(d);
+      await enrichMissingContacts(d);
+      prepareArrivals(d);
     } catch {
       /* hoppa över datum utan ankomster */
     }
   }
-  return c.json({ ok: true, ...summary });
+  // Excel saknar oftast telefon/e-post – låt Frontdesk-skrapan fylla i.
+  const fetchStarted = await triggerArrivalFetch(date);
+  return c.json({ ok: true, ...summary, fetchStarted });
 });
 
 app.post("/assign", async (c) => {
@@ -660,8 +691,8 @@ if (!config.enableInternalCron) {
 }
 
 // ─── Cron: trigga hämtning av ankomstlistan (GitHub Actions) ─────────────────
-// Körs från vår server eftersom GitHubs schemaläggare hoppar över/förskjuter
-// körningar. GitHubs eget schema ligger kvar som backup.
+// Körs från vår server. Inkluderar eftermiddags-tider så samma-dags-bokningar
+// under lågsäsong hinner med.
 if (config.github.token) {
   for (const schedule of config.github.fetchSchedules.split(";").map((s) => s.trim()).filter(Boolean)) {
     if (!cron.validate(schedule)) {

@@ -355,13 +355,22 @@ export async function syncBookings(options: { full?: boolean } = {}): Promise<Sy
     sinceIso = d.toISOString();
   }
 
-  const codes = await listBookingCodes(sinceIso);
-  if (codes.length >= 1000) {
+  const codes = new Set(await listBookingCodes(sinceIso));
+  // Samma-dags-bokningar kan missa incremental-fönstret (klockslag vid
+  // last_sync). Unionera alltid de senaste två dygnens uppdateringar.
+  const recent = new Date();
+  recent.setDate(recent.getDate() - 2);
+  try {
+    for (const c of await listBookingCodes(recent.toISOString())) codes.add(c);
+  } catch (err) {
+    console.warn("[bookvisit] kunde inte hämta 2-dygnsfönster:", err);
+  }
+  if (codes.size >= 1000) {
     console.warn(
       "[bookvisit] booking-codes returnerade 1000 (API-tak nått) – risk att nyaste bokningar trunkeras. Minska BOOKVISIT_LOOKBACK_DAYS.",
     );
   }
-  const { fetched, failed } = await fetchAndStore(codes, 4);
+  const { fetched, failed } = await fetchAndStore([...codes], 4);
 
   setSetting("bv_last_sync", startedAt);
   setSetting("bv_last_sync_human", startedAt);
@@ -373,7 +382,7 @@ export async function syncBookings(options: { full?: boolean } = {}): Promise<Sy
     console.error("[bookvisit] kunde inte uppdatera kundregistret:", err);
   }
 
-  return { codes: codes.length, fetched, failed, fullSync: !lastSync };
+  return { codes: codes.size, fetched, failed, fullSync: !lastSync };
 }
 
 export interface CachedArrival {
@@ -438,6 +447,16 @@ export function countRoomlessForDate(date: string): number {
       )
       .get(date) as { n: number }
   ).n;
+}
+
+// Hämtar enskilda bokningar via kod (från Frontdesk/Excel). Fångar sena
+// bokningar som ännu inte syns i booking-codes-v1, och OTA-bokningar som
+// ibland går att slå upp direkt.
+export async function fetchBookingsByCodes(codes: string[]): Promise<number> {
+  const unique = [...new Set(codes.map((c) => c.trim()).filter(Boolean))];
+  if (unique.length === 0) return 0;
+  const { fetched } = await fetchAndStore(unique, 3);
+  return fetched;
 }
 
 export function bookingCount(): number {

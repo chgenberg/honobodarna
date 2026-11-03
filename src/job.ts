@@ -1,5 +1,6 @@
 import { db } from "./db.js";
 import { getArrivalsForDate, syncBookings, normalizePhone } from "./bookvisit.js";
+import { enrichMissingContacts } from "./enrich.js";
 import { assignCabinsForDate, getCabinsForBooking, isVillaCabin } from "./matching.js";
 import { sendSms } from "./sms.js";
 import { sendEmail } from "./email.js";
@@ -35,7 +36,8 @@ const upsertArrival = db.prepare(`
     (@arrival_date, @booking_code, @booking_guid, @guest_name, @phone, @email,
      @room_id, @room_type_label, @is_package, @has_seafood, 'pending')
   ON CONFLICT(booking_code, arrival_date) DO UPDATE SET
-    guest_name=excluded.guest_name, phone=excluded.phone, email=excluded.email,
+    guest_name=excluded.guest_name,
+    phone=COALESCE(excluded.phone, arrivals.phone), email=COALESCE(excluded.email, arrivals.email),
     room_id=excluded.room_id, room_type_label=excluded.room_type_label,
     is_package=excluded.is_package, has_seafood=excluded.has_seafood, updated_at=datetime('now')
 `);
@@ -64,6 +66,15 @@ export function prepareArrivals(date: string): ArrivalRow[] {
   tx();
   assignCabinsForDate(date);
   return getArrivals(date);
+}
+
+export async function sendPendingArrivals(date: string): Promise<SendOutcome[]> {
+  const outcomes: SendOutcome[] = [];
+  for (const a of getArrivals(date)) {
+    if (a.status === "sent") continue;
+    outcomes.push(await sendForArrival(a.id));
+  }
+  return outcomes;
 }
 
 // Alla boendeankomster (med rum). is_package skiljer paket från vanliga.
@@ -230,7 +241,14 @@ export async function runMorningJob(opts: {
     }
   }
 
-  const arrivals = prepareArrivals(date);
+  prepareArrivals(date);
+  try {
+    await enrichMissingContacts(date);
+    prepareArrivals(date);
+  } catch (err) {
+    console.error("[job] Kontaktkomplettering misslyckades:", err);
+  }
+  const arrivals = getArrivals(date);
   const outcomes: SendOutcome[] = [];
 
   // Morgonkörningen (cron): varna receptionen per mejl om sjöbodar inte kunde
@@ -244,11 +262,7 @@ export async function runMorningJob(opts: {
   }
 
   if (shouldSend) {
-    for (const a of arrivals) {
-      if (a.status === "sent") continue;
-      const out = await sendForArrival(a.id);
-      outcomes.push(out);
-    }
+    outcomes.push(...(await sendPendingArrivals(date)));
   }
 
   // Cykel-notiser (samma körning, egen text). Förbereds alltid; skickas om

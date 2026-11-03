@@ -6,6 +6,11 @@ name: Hämta BookVisit ankomstlista
 # Manuell körning: Actions → "Hämta BookVisit ankomstlista" → Run workflow.
 on:
   workflow_dispatch:
+    inputs:
+      arrival_date:
+        description: "Ankomstdatum YYYY-MM-DD (tomt = idag i Stockholm)"
+        required: false
+        type: string
 
 jobs:
   fetch:
@@ -25,6 +30,7 @@ jobs:
           BOOKVISIT_PASS: ${{ secrets.BOOKVISIT_PASS }}
           APP_UPLOAD_URL: ${{ secrets.APP_UPLOAD_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ARRIVAL_DATE: ${{ inputs.arrival_date }}
       - name: Spara felskärmdumpar (vid fel)
         if: failure()
         uses: actions/upload-artifact@v4

@@ -13,7 +13,8 @@
     "seed": "tsx scripts/seed.ts",
     "send:today": "tsx scripts/run-job.ts",
     "typecheck": "tsc --noEmit",
-    "verify:multi-cabin": "tsx scripts/verify-multi-cabin.ts"
+    "verify:multi-cabin": "tsx scripts/verify-multi-cabin.ts",
+    "verify:late-booking": "tsx scripts/verify-late-booking.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

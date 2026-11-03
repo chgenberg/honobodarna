@@ -3,7 +3,7 @@
 // schemaläggare både förskjuter och hoppar över körningar.
 import { config } from "./config.js";
 
-export async function triggerArrivalFetch(): Promise<boolean> {
+export async function triggerArrivalFetch(date?: string): Promise<boolean> {
   if (!config.github.token) {
     console.warn("[gh-trigger] GITHUB_TOKEN saknas – kan inte trigga hämtningen.");
     return false;
@@ -19,7 +19,10 @@ export async function triggerArrivalFetch(): Promise<boolean> {
         "user-agent": "hono-sjobodar",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ ref: "main" }),
+      body: JSON.stringify({
+        ref: "main",
+        inputs: date ? { arrival_date: date } : {},
+      }),
     });
     if (res.status === 204) {
       console.log("[gh-trigger] Hämtning av ankomstlista triggad.");
