@@ -69,8 +69,19 @@ async function login(page: Page) {
     .locator('a:has-text("Fortsätt"), button:has-text("Fortsätt"), button[type="submit"], input[type="submit"]')
     .first()
     .click();
-  // Verifiera att vi är inloggade (URL:en lämnar login-sidan).
-  await page.waitForURL((u) => !u.pathname.toLowerCase().includes("/account/login"), { timeout: 60_000 });
+  // Verifiera att vi är inloggade (URL:en lämnar login-sidan). Sedan nov 2026
+  // visar BookVisit en 2FA-uppmaning på login-URL:en; den måste klickas bort.
+  const leftLogin = (u: URL) => !u.pathname.toLowerCase().includes("/account/login");
+  const skip2fa = page.locator('a:has-text("Hoppa över tills vidare"), button:has-text("Hoppa över tills vidare")').first();
+  await Promise.race([
+    page.waitForURL(leftLogin, { timeout: 60_000 }),
+    skip2fa.waitFor({ timeout: 60_000 }),
+  ]);
+  if (await skip2fa.isVisible().catch(() => false)) {
+    console.log("2FA-uppmaning visas – hoppar över tills vidare.");
+    await skip2fa.click();
+    await page.waitForURL(leftLogin, { timeout: 60_000 });
+  }
   console.log("✓ Inloggad.");
 }
 
