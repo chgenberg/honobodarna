@@ -14,10 +14,12 @@
 //   BOOKVISIT_USER, BOOKVISIT_PASS   inloggning
 //   APP_UPLOAD_URL                   https://.../api/upload-arrivals
 //   CRON_SECRET                      samma token som i appen
+//   BOOKVISIT_TOTP_SECRET            2FA-nyckeln (base32) som visades vid aktiveringen
 // Valfria:
 //   BOOKVISIT_LOGIN_URL              default https://admin.bookvisit.com/Account/Login
 //   ARRIVAL_DATE                     YYYY-MM-DD (default = idag i Europe/Stockholm)
 //   HEADFUL=1                        synlig webbläsare vid lokal felsökning
+import { createHmac } from "node:crypto";
 import { chromium, type BrowserContext, type Page } from "playwright";
 
 function need(name: string): string {
@@ -58,6 +60,23 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: `debug-${name}.png`, fullPage: true }).catch(() => {});
 }
 
+// RFC 6238 (30 s, 6 siffror, SHA-1) – samma koder som Google/Microsoft Authenticator.
+function totp(secret: string, at = Date.now()): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const ch of secret.replace(/[\s=]/g, "").toUpperCase()) {
+    const v = alphabet.indexOf(ch);
+    if (v < 0) throw new Error("BOOKVISIT_TOTP_SECRET innehåller ogiltiga tecken");
+    bits += v.toString(2).padStart(5, "0");
+  }
+  const key = Buffer.from(bits.match(/.{8}/g)!.map((b) => parseInt(b, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(at / 1000 / 30)));
+  const h = createHmac("sha1", key).update(counter).digest();
+  const off = h[h.length - 1] & 0xf;
+  return String((h.readUInt32BE(off) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
 async function login(page: Page) {
   await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" });
   // Två fält: e-post + lösenord, knappen heter "Fortsätt".
@@ -70,14 +89,31 @@ async function login(page: Page) {
     .first()
     .click();
   // Verifiera att vi är inloggade (URL:en lämnar login-sidan). Sedan nov 2026
-  // visar BookVisit en 2FA-uppmaning på login-URL:en; den måste klickas bort.
+  // visar BookVisit 2FA på login-URL:en: antingen kodfältet (2FA aktiverat)
+  // eller aktiveringsuppmaningen med "Hoppa över tills vidare".
   const leftLogin = (u: URL) => !u.pathname.toLowerCase().includes("/account/login");
   const skip2fa = page.locator('a:has-text("Hoppa över tills vidare"), button:has-text("Hoppa över tills vidare")').first();
+  const codeField = page
+    .locator('input[placeholder*="faktor" i], input[placeholder*="kod" i], input[autocomplete="one-time-code"]')
+    .first();
   await Promise.race([
     page.waitForURL(leftLogin, { timeout: 60_000 }),
     skip2fa.waitFor({ timeout: 60_000 }),
+    codeField.waitFor({ timeout: 60_000 }),
   ]);
-  if (await skip2fa.isVisible().catch(() => false)) {
+  const secret = process.env.BOOKVISIT_TOTP_SECRET;
+  const skipVisible = await skip2fa.isVisible().catch(() => false);
+  if (secret && !skipVisible && (await codeField.isVisible().catch(() => false))) {
+    // Undvik en kod som hinner gå ut innan BookVisit tar emot den.
+    if (30 - ((Date.now() / 1000) % 30) < 5) await page.waitForTimeout(6_000);
+    await codeField.fill(totp(secret));
+    await page
+      .locator('a:has-text("Fortsätt"), button:has-text("Fortsätt"), button[type="submit"], input[type="submit"]')
+      .first()
+      .click();
+    await page.waitForURL(leftLogin, { timeout: 60_000 });
+    console.log("✓ Tvåfaktorskod godkänd.");
+  } else if (skipVisible) {
     console.log("2FA-uppmaning visas – hoppar över tills vidare.");
     await skip2fa.click();
     await page.waitForURL(leftLogin, { timeout: 60_000 });

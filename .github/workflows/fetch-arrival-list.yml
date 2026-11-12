@@ -28,6 +28,7 @@ jobs:
         env:
           BOOKVISIT_USER: ${{ secrets.BOOKVISIT_USER }}
           BOOKVISIT_PASS: ${{ secrets.BOOKVISIT_PASS }}
+          BOOKVISIT_TOTP_SECRET: ${{ secrets.BOOKVISIT_TOTP_SECRET }}
           APP_UPLOAD_URL: ${{ secrets.APP_UPLOAD_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           ARRIVAL_DATE: ${{ inputs.arrival_date }}
